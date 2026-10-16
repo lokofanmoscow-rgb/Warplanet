@@ -44,6 +44,26 @@ jobs:
       - name: Сборка APK
         working-directory: android
         run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --max-workers=3 --no-daemon
+      # Подпись своим ключом, если в Settings → Secrets → Actions заданы ANDROID_KEYSTORE_BASE64,
+      # ANDROID_KEYSTORE_PASSWORD и ANDROID_KEY_ALIAS. Без них APK подписан отладочным ключом.
+      - name: Подпись APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Секреты подписи не заданы — остаётся отладочная подпись"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          "$APKSIGNER" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD --out "$APK.signed" "$APK"
+          mv "$APK.signed" "$APK"
+          "$APKSIGNER" verify --print-certs "$APK" | head -2
+          rm -f "$RUNNER_TEMP/release.jks"
       - uses: actions/upload-artifact@v4
         with:
           name: warplanet-apk

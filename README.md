@@ -52,7 +52,20 @@ cd android
 
 Или сразу на подключённый телефон: `npx expo run:android`.
 
-Release‑APK подписан отладочным ключом — его можно ставить на телефоны напрямую. Для Google Play нужен свой ключ: [инструкция Expo](https://docs.expo.dev/guides/local-app-production/).
+### Подпись своим ключом
+
+Без настроек release‑APK подписан стандартным отладочным ключом Android. Он публичный и одинаковый у всех, поэтому отдельные антивирусы на эвристиках помечают такие файлы как «потенциально нежелательные» (PUP). Подпишите APK своим ключом:
+
+```bash
+# один раз: создать ключ (храните файл и пароль — без них не выпустить обновление)
+keytool -genkeypair -keystore warplanet-release.jks -storetype PKCS12 -alias warplanet \
+  -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=WarPlanet"
+# подписать собранный APK
+apksigner sign --ks warplanet-release.jks --ks-key-alias warplanet \
+  --out WarPlanet.apk android/app/build/outputs/apk/release/app-release.apk
+```
+
+Для GitHub Actions добавьте в **Settings → Secrets and variables → Actions** секреты `ANDROID_KEYSTORE_BASE64` (файл ключа в base64: `base64 -w0 warplanet-release.jks`), `ANDROID_KEYSTORE_PASSWORD` и `ANDROID_KEY_ALIAS` — сборка будет подписываться автоматически. EAS создаёт и хранит ключ сам. Файлы ключей в репозиторий не кладутся (`*.jks` в `.gitignore`).
 
 ## Как играть вдвоём по Wi‑Fi
 
