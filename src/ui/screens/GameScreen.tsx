@@ -13,6 +13,8 @@ import { buildPlates, MapView } from '../map/MapView';
 import { useNav } from '../nav';
 import { COLORS, useLayout } from '../theme';
 
+const NO_TARGETS: CellId[] = [];
+
 function useController(c: MatchController): number {
   return useSyncExternalStore(c.subscribe, c.getVersion, c.getVersion);
 }
@@ -61,11 +63,13 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Таймер для отсчёта ожидания отвалившегося игрока.
+  // Таймер отсчёта — только пока ждём отвалившегося игрока, чтобы не перерисовывать экран зря.
+  const waitingClient = c.mode === 'host' && !!c.host && !c.host.clientConnected && !c.host.paused && c.host.disconnectedAt !== null;
   useEffect(() => {
+    if (!waitingClient) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [waitingClient]);
 
   const exit = useCallback(() => {
     c.dispose();
@@ -106,7 +110,11 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     () => (editable ? plan.available.map((n, i) => (n > 0 ? i : -1)).filter((i) => i >= 0) : []),
     [editable, plan],
   );
-  const targets = moveFrom !== null ? map.cells[moveFrom].neighbors : [];
+  const targets = moveFrom !== null ? map.cells[moveFrom].neighbors : NO_TARGETS;
+  const mapInsets = useMemo(
+    () => ({ top: insets.top + 70 * s, bottom: insets.bottom, left: insets.left, right: insets.right }),
+    [insets.top, insets.bottom, insets.left, insets.right, s],
+  );
 
   const openMove = (from: CellId, to: CellId) => {
     if (!editable) return;
@@ -188,7 +196,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
         onTapCell={onTapCell}
         onDragMove={openMove}
         focusCell={focus}
-        insets={{ top: insets.top + 70 * s, bottom: insets.bottom, left: insets.left, right: insets.right }}
+        insets={mapInsets}
       />
 
       {/* Верхняя панель */}

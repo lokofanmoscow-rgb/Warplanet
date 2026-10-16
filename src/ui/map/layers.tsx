@@ -9,6 +9,7 @@ import {
   ImageShader,
   Path,
   Rect,
+  RoundedRect,
   Shader,
   Skia,
   Text,
@@ -21,7 +22,7 @@ import type { CellId, CellState, GameState, MapDef, Move, PlayerId } from '../..
 import { COLORS, shade, withAlpha } from '../theme';
 import { decorFor } from './decor';
 import { neutralArea, stateBorders, territory, type MapGeometry } from './geometry';
-import { ArmyIcon, Capital, City, citySizeFor, Decor, FlagMarker, Fort, Plate, type SpriteImages } from './sprites';
+import { Capital, City, citySizeFor, Decor, FlagMarker, Fort, type SpriteImages } from './sprites';
 
 // ---------- Море: статичный слой, рендерится один раз в картинку ----------
 
@@ -51,13 +52,6 @@ function SeaElements({ geo }: { geo: MapGeometry }) {
       <Path path={geo.coastPath} color="rgba(255,255,255,0.55)" style="stroke" strokeWidth={6}>
         <BlurMask blur={2.5} style="normal" />
       </Path>
-      {/* Суша вне игры: приглушённая. */}
-      <Path path={geo.backgroundPath} color={COLORS.background} />
-      <Path path={geo.backgroundPath} opacity={0.12}>
-        <FractalNoise freqX={0.08} freqY={0.08} octaves={3} />
-      </Path>
-      <Path path={geo.backgroundPath} color="rgba(43,33,24,0.25)" />
-      <Path path={geo.backgroundPath} color={withAlpha(COLORS.border, 0.5)} style="stroke" strokeWidth={1} />
     </Group>
   );
 }
@@ -124,14 +118,15 @@ half4 main(float2 p) {
   return half4(a, a, a, a);
 }`);
 
+/** Рябь — простой прямоугольник с шейдером под картинкой суши (сложный контур моря в каждом кадре не нужен). */
 export function WaterRipple({ geo, animate }: { geo: MapGeometry; animate: boolean }) {
   const clock = useClock();
   const uniforms = useDerivedValue(() => ({ t: animate ? clock.value / 1000 : 0 }));
   if (!RIPPLE) return null;
   return (
-    <Path path={geo.seaPath}>
+    <Rect x={0} y={0} width={geo.map.width} height={geo.map.height}>
       <Shader source={RIPPLE} uniforms={uniforms} />
-    </Path>
+    </Rect>
   );
 }
 
@@ -163,6 +158,15 @@ export const LandLayer = React.memo(function LandLayer({
 
   return (
     <Group>
+      {/* Суша вне игры: приглушённая. */}
+      <Path path={geo.backgroundPath} color={COLORS.background} />
+      {noise && (
+        <Path path={geo.backgroundPath} opacity={0.12} blendMode="multiply">
+          <ImageShader image={noise} tx="repeat" ty="repeat" />
+        </Path>
+      )}
+      <Path path={geo.backgroundPath} color="rgba(43,33,24,0.25)" />
+      <Path path={geo.backgroundPath} color={withAlpha(COLORS.border, 0.5)} style="stroke" strokeWidth={1} />
       {map.cells.map((c, i) =>
         c.kind === 'land' ? <Path key={c.id} path={geo.cellPaths[i]} color={fillColor(cells[i].owner, game)} /> : null,
       )}
@@ -291,23 +295,23 @@ export function plateAnchor(map: MapDef, cell: CellId): [number, number] {
   return c.kind === 'sea' ? c.center : [c.center[0], c.center[1] - 26];
 }
 
-export function PlateLayer({
+/** Плашки численности: рамка в цвете владельца и число — минимум команд рисования на плашку. */
+export const PlateLayer = React.memo(function PlateLayer({
   geo,
   game,
   plates,
   font,
   k,
-  images,
 }: {
   geo: MapGeometry;
   game: GameState;
   plates: PlateInfo[];
   font: SkFont | null;
   k: number;
-  images: SpriteImages;
 }) {
   if (!font) return null;
   const size = font.getSize();
+  const h = 15 * k;
   return (
     <Group>
       {plates.map((p) => {
@@ -315,25 +319,52 @@ export function PlateLayer({
         const left = p.troops - p.outgoing;
         if (left <= 0) return null;
         const label = p.recruited > 0 ? `${left}+` : `${left}`;
-        const tw = font.measureText(label).width;
-        const neutral = p.owner === null;
-        const iconW = neutral ? 0 : 12;
-        const width = (tw + iconW + 10) * k;
-        const color = p.owner !== null ? game.players[p.owner].color : null;
         const sea = geo.map.cells[p.cell].kind === 'sea';
-        const textX = x - width / 2 + (iconW + 5) * k;
+        const tw = font.measureText(label).width;
+        const width = (tw + (sea ? 18 : 10)) * k;
+        const color = p.owner !== null ? game.players[p.owner].color : null;
+        const x0 = x - width / 2;
         return (
           <Group key={p.cell}>
-            <Plate x={x} y={y} s={k} width={width} color={color} dim={neutral} />
-            {!neutral && <ArmyIcon x={x - width / 2 + 8 * k} y={y + 2 * k} s={k * 0.85} color={color!} sea={sea} images={images} />}
-            <Group transform={[{ translateX: textX }, { translateY: y + (size * 0.36) * k }, { scale: k }]}>
-              <Text x={0} y={0} text={label} font={font} color={neutral ? '#EDE3CF' : COLORS.text} />
+            <RoundedRect x={x0} y={y - h / 2} width={width} height={h} r={3.5 * k} color={color ? COLORS.panel : '#5B5145'} />
+            <RoundedRect
+              x={x0}
+              y={y - h / 2}
+              width={width}
+              height={h}
+              r={3.5 * k}
+              color={color ?? '#A39885'}
+              style="stroke"
+              strokeWidth={2 * k}
+            />
+            {sea && color ? <ShipGlyph x={x0 + 7.5 * k} y={y} k={k} color={color} /> : null}
+            <Group transform={[{ translateX: x0 + (sea ? 13 : 5) * k }, { translateY: y + size * 0.36 * k }, { scale: k }]}>
+              <Text x={0} y={0} text={label} font={font} color={color ? COLORS.text : '#EDE3CF'} />
             </Group>
           </Group>
         );
       })}
     </Group>
   );
+});
+
+function ShipGlyph({ x, y, k, color }: { x: number; y: number; k: number; color: string }) {
+  const path = useMemo(
+    () =>
+      Skia.PathBuilder.Make()
+        .moveTo(x - 4.5 * k, y + 0.5 * k)
+        .lineTo(x + 4.5 * k, y + 0.5 * k)
+        .lineTo(x + 3 * k, y + 3.5 * k)
+        .lineTo(x - 3 * k, y + 3.5 * k)
+        .close()
+        .moveTo(x - 0.5 * k, y - 5 * k)
+        .lineTo(x + 3.5 * k, y - 0.3 * k)
+        .lineTo(x - 0.5 * k, y - 0.3 * k)
+        .close()
+        .build(),
+    [x, y, k],
+  );
+  return <Path path={path} color={color} />;
 }
 
 // ---------- Стрелки приказов ----------
@@ -366,7 +397,7 @@ function arrowPath(x1: number, y1: number, x2: number, y2: number, bend: number,
   return { body, headPath, mid: [(x1 + 2 * cx + ex) / 4, (y1 + 2 * cy + ey) / 4] as [number, number] };
 }
 
-export function ArrowLayer({
+export const ArrowLayer = React.memo(function ArrowLayer({
   geo,
   moves,
   color,
@@ -406,7 +437,7 @@ export function ArrowLayer({
       })}
     </Group>
   );
-}
+});
 
 /** Стрелка, которую тянет палец. */
 export function DragArrow({

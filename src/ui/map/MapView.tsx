@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import { Canvas, Group, Rect, Skia, useTypeface, type SkFont } from '@shopify/react-native-skia';
 import {
   GestureDetector,
@@ -15,12 +15,8 @@ import { COLORS } from '../theme';
 import { cellAt, getGeometry } from './geometry';
 import {
   ArrowLayer,
-  CityLayer,
-  DecorLayer,
   DragArrow,
   fortKey,
-  LabelLayer,
-  LandLayer,
   ownershipKey,
   plateAnchor,
   PlateLayer,
@@ -32,6 +28,7 @@ import {
   type PlateInfo,
 } from './layers';
 import { useSpriteImages } from './sprites';
+import { BASE_RES, StaticMap, type DetailRequest } from './StaticMap';
 
 export interface MapViewProps {
   map: MapDef;
@@ -58,6 +55,8 @@ export interface MapViewProps {
 }
 
 const FONT_SRC = require('../../../assets/fonts/PTSans-Bold.ttf');
+const EMPTY: CellId[] = [];
+const NO_MOVES: Move[] = [];
 
 export function MapView(props: MapViewProps) {
   const { map, game, interactive = true } = props;
@@ -79,11 +78,50 @@ export function MapView(props: MapViewProps) {
 
   const insets = props.insets ?? { top: 0, bottom: 0, left: 0, right: 0 };
   const fitted = useRef(false);
+  // Обработчики берутся из ref, чтобы жесты не пересоздавались на каждой перерисовке экрана.
+  const propsRef = useRef(props);
+  propsRef.current = props;
+
+  // Чёткая картинка видимой области: пересчитывается после жеста, когда карта приближена.
+  const [detail, setDetail] = useState<DetailRequest | null>(null);
+  const layoutRef = useRef<{ w: number; h: number } | null>(null);
+  const detailTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestDetail = useCallback(
+    (delay = 120) => {
+      if (detailTimer.current) clearTimeout(detailTimer.current);
+      detailTimer.current = setTimeout(() => {
+        const lay = layoutRef.current;
+        if (!lay || propsRef.current.drift) return setDetail(null);
+        const z = sc.value;
+        const ps = z * PixelRatio.get();
+        const labels = z >= 0.55;
+        if (ps <= BASE_RES * 1.15 && !labels) return setDetail(null);
+        // Видимая область плюс поля на случай прокрутки.
+        const vx = -tx.value / z;
+        const vy = -ty.value / z;
+        const vw = lay.w / z;
+        const vh = lay.h / z;
+        const x0 = Math.max(0, vx - vw * 0.2);
+        const y0 = Math.max(0, vy - vh * 0.2);
+        const x1 = Math.min(map.width, vx + vw * 1.2);
+        const y1 = Math.min(map.height, vy + vh * 1.2);
+        if (x1 <= x0 || y1 <= y0) return setDetail(null);
+        const maxPx = 4096;
+        const scale = Math.min(ps, maxPx / (x1 - x0), maxPx / (y1 - y0));
+        setDetail({ x0, y0, w: x1 - x0, h: y1 - y0, ps: scale, labelK: labels ? Math.max(0.6, Math.min(2.2, 1.0 / z)) : null });
+      }, delay);
+    },
+    [map, sc, tx, ty],
+  );
+  useEffect(() => () => {
+    if (detailTimer.current) clearTimeout(detailTimer.current);
+  }, []);
 
   const onLayout = useCallback(
     (e: LayoutChangeEvent) => {
       const { width: w, height: h } = e.nativeEvent.layout;
       setLayout({ w, h });
+      layoutRef.current = { w, h };
       const availW = Math.max(100, w - insets.left - insets.right);
       const availH = Math.max(100, h - insets.top - insets.bottom);
       const fit = Math.min(availW / map.width, availH / map.height);
@@ -98,8 +136,9 @@ export function MapView(props: MapViewProps) {
         ty.value = insets.top + (availH - map.height * start) / 2;
         setZoom(start);
       }
+      requestDetail();
     },
-    [map, insets.left, insets.right, insets.top, insets.bottom, sc, size, tx, ty],
+    [map, insets.left, insets.right, insets.top, insets.bottom, sc, size, tx, ty, requestDetail],
   );
 
   // Фокус на клетке (например, на столице в начале партии).
@@ -109,10 +148,13 @@ export function MapView(props: MapViewProps) {
     const z = Math.max(sc.value, Math.min(size.value.maxSc, (size.value.minSc / 0.9) * 2.2));
     const cx = insets.left + (layout.w - insets.left - insets.right) / 2;
     const cy = insets.top + (layout.h - insets.top - insets.bottom) / 2;
+    // Столица у края карты — не показываем пустоту за краем.
+    const [fx, fy] = clampOffset(cx - x * z, cy - y * z, z, layout.w, layout.h, map.width, map.height);
     sc.value = withTiming(z, { duration: 450 });
-    tx.value = withTiming(cx - x * z, { duration: 450 });
-    ty.value = withTiming(cy - y * z, { duration: 450 });
+    tx.value = withTiming(fx, { duration: 450 });
+    ty.value = withTiming(fy, { duration: 450 });
     setZoom(z);
+    requestDetail(520);
   }, [props.focusCell, layout]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Медленный дрейф для фона меню.
@@ -154,18 +196,25 @@ export function MapView(props: MapViewProps) {
     (sx: number, sy: number) => {
       const x = (sx - tx.value) / sc.value;
       const y = (sy - ty.value) / sc.value;
-      props.onTapCell?.(cellAt(geo, x, y));
+      propsRef.current.onTapCell?.(cellAt(geo, x, y));
     },
-    [geo, props, sc, tx, ty],
+    [geo, sc, tx, ty],
   );
   const handleDrop = useCallback(
     (from: number, x: number, y: number) => {
       const to = cellAt(geo, x, y);
-      if (to !== null && to !== from) props.onDragMove?.(from, to);
+      if (to !== null && to !== from) propsRef.current.onDragMove?.(from, to);
     },
-    [geo, props],
+    [geo],
   );
-  const zoomChanged = useCallback((z: number) => setZoom(z), []);
+  const zoomChanged = useCallback(
+    (z: number) => {
+      setZoom(z);
+      requestDetail();
+    },
+    [requestDetail],
+  );
+  const panEnded = useCallback(() => requestDetail(), [requestDetail]);
 
   // В функции жестов (UI-поток) передаём только числа, а не весь объект карты с контурами.
   const mapW = map.width;
@@ -173,16 +222,9 @@ export function MapView(props: MapViewProps) {
   const clampView = () => {
     'worklet';
     const s = size.value;
-    const mw = mapW * sc.value;
-    const mh = mapH * sc.value;
-    // Карта не уезжает за край дальше поля; меньшая экрана — по центру.
-    const margin = 60;
-    const loX = Math.min(s.w - mw - margin, (s.w - mw) / 2);
-    const hiX = Math.max(margin, (s.w - mw) / 2);
-    const loY = Math.min(s.h - mh - margin, (s.h - mh) / 2);
-    const hiY = Math.max(margin, (s.h - mh) / 2);
-    tx.value = Math.min(hiX, Math.max(loX, tx.value));
-    ty.value = Math.min(hiY, Math.max(loY, ty.value));
+    const [x, y] = clampOffset(tx.value, ty.value, sc.value, s.w, s.h, mapW, mapH);
+    tx.value = x;
+    ty.value = y;
   };
 
   const pan = usePanGesture({
@@ -196,12 +238,17 @@ export function MapView(props: MapViewProps) {
       // Палец на своей армии — тянем стрелку приказа, иначе двигаем карту.
       const mx = (e.x - tx.value) / sc.value;
       const my = (e.y - ty.value) / sc.value;
-      const r = Math.max(22, 30 / sc.value);
+      // Захват — только по самой плашке (примерно 44×32 точки экрана), иначе карта не листалась бы.
+      const rx = 22 / sc.value;
+      const ry = 16 / sc.value;
       const a = anchors.value;
       let best = -1;
-      let bestD = r;
+      let bestD = Infinity;
       for (let i = 0; i < a.length; i += 3) {
-        const d = Math.hypot(a[i + 1] - mx, a[i + 2] - my);
+        const dx = Math.abs(a[i + 1] - mx);
+        const dy = Math.abs(a[i + 2] - my);
+        if (dx > rx || dy > ry) continue;
+        const d = dx / rx + dy / ry;
         if (d < bestD) {
           bestD = d;
           best = i;
@@ -238,6 +285,7 @@ export function MapView(props: MapViewProps) {
     },
     onFinalize: () => {
       'worklet';
+      if (dragCell.value < 0) runOnJS(panEnded)();
       dragging.value = false;
       dragCell.value = -1;
     },
@@ -281,8 +329,6 @@ export function MapView(props: MapViewProps) {
 
   // Размер иконок в единицах карты: на экране плашка примерно одного размера при любом зуме.
   const k = Math.max(0.6, Math.min(3, 1.05 / zoom));
-  const labelK = Math.max(0.6, Math.min(2.2, 1.0 / zoom));
-  const showLabels = zoom >= 0.55;
   const own = useMemo(() => ownershipKey(game.cells), [game.cells]);
   const forts = useMemo(() => fortKey(game), [game]);
   const moveColor = props.moveColor ?? COLORS.gold;
@@ -296,14 +342,20 @@ export function MapView(props: MapViewProps) {
             <Group transform={transform}>
               <SeaLayer geo={geo} />
               <WaterRipple geo={geo} animate={!props.drift} />
-              <LandLayer geo={geo} game={game} ownershipKey={own} noise={noise} />
-              <DecorLayer geo={geo} images={images} />
-              <SelectionLayer geo={geo} cell={props.selected ?? null} targets={props.targets ?? []} />
-              <CityLayer geo={geo} game={game} fortKey={forts} images={images} />
-              {showLabels && <LabelLayer geo={geo} font={labelFont} k={labelK} />}
+              <StaticMap
+                geo={geo}
+                game={game}
+                own={own}
+                forts={forts}
+                images={images}
+                noise={noise}
+                detail={detail}
+                labelFont={labelFont}
+              />
+              <SelectionLayer geo={geo} cell={props.selected ?? null} targets={props.targets ?? EMPTY} />
               {props.startPoints && <StartPointsLayer geo={geo} points={props.startPoints} font={plateFont} k={k} />}
-              <ArrowLayer geo={geo} moves={props.moves ?? []} color={moveColor} font={plateFont} k={k} />
-              <PlateLayer geo={geo} game={game} plates={props.plates} font={plateFont} k={k} images={images} />
+              <ArrowLayer geo={geo} moves={props.moves ?? NO_MOVES} color={moveColor} font={plateFont} k={k} />
+              <PlateLayer geo={geo} game={game} plates={props.plates} font={plateFont} k={k} />
               <DragArrow from={dragFrom} point={dragPoint} active={dragging} color={moveColor} k={k} />
             </Group>
           </Canvas>
@@ -311,6 +363,19 @@ export function MapView(props: MapViewProps) {
       </GestureDetector>
     </View>
   );
+}
+
+/** Карта не уезжает за край экрана дальше поля; если она меньше экрана — по центру. */
+function clampOffset(x: number, y: number, z: number, w: number, h: number, mapW: number, mapH: number): [number, number] {
+  'worklet';
+  const mw = mapW * z;
+  const mh = mapH * z;
+  const margin = 60;
+  const loX = Math.min(w - mw - margin, (w - mw) / 2);
+  const hiX = Math.max(margin, (w - mw) / 2);
+  const loY = Math.min(h - mh - margin, (h - mh) / 2);
+  const hiY = Math.max(margin, (h - mh) / 2);
+  return [Math.min(hiX, Math.max(loX, x)), Math.min(hiY, Math.max(loY, y))];
 }
 
 /** Плашки по состоянию партии и плану игрока. */
