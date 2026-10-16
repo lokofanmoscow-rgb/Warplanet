@@ -43,3 +43,4 @@ yarn-error.*
 # map build cache and previews
 tools/maps/.cache/
 tools/maps/out/
+public/canvaskit.wasm

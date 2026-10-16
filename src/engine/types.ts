@@ -34,6 +34,12 @@ export interface MapDef {
   startPoints: CellId[];
   /** Переходы через проливы, уже учтены в neighbors. */
   straits?: [CellId, CellId][];
+  /** Суша вне игры (для красоты), контуры как у клеток. */
+  background?: number[][];
+  /** Русские названия стран по коду. */
+  countries?: Record<string, string>;
+  /** Декор: точки гор. */
+  decor?: { mountains: [number, number][] };
 }
 
 // ---------- Состояние партии ----------

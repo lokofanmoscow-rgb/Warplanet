@@ -583,6 +583,16 @@ const result = {
   cells: outCells,
   startPoints,
   straits,
+  // Русские названия стран — так называются ИИ-соперники по своей столице.
+  countries: Object.fromEntries(
+    cfg.countries.map((code) => [code, admin0.find((c) => c.ADM0_A3 === code)?.NAME_RU ?? code]),
+  ),
+  decor: {
+    mountains: (cfg.mountains ?? [])
+      .map((p) => projection(p))
+      .filter((p) => landCells.some((c) => pointInGeometry(p, c.f.geometry)))
+      .map((p) => [Math.round(p[0]), Math.round(p[1])]),
+  },
   background: (final.bgland.features ?? final.bgland.geometries.map((g) => ({ geometry: g })))
     .filter((f) => f.geometry)
     .flatMap((f) => rings(f.geometry).map(flat))
