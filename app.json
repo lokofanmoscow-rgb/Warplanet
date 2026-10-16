@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "WarPlanet",
+    "slug": "warplanet",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#2B2118",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#2B2118"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.warplanet.game"
+    },
+    "android": {
+      "package": "com.warplanet.game",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#2B2118",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/PTSans-Regular.ttf",
+            "./assets/fonts/PTSans-Bold.ttf",
+            "./assets/fonts/PTSerif-Regular.ttf",
+            "./assets/fonts/PTSerif-Bold.ttf"
+          ]
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
+  }
+}
