@@ -189,8 +189,10 @@ export function MapView(props: MapViewProps) {
   const dragFrom = useSharedValue<[number, number]>([0, 0]);
   const dragPoint = useSharedValue<[number, number]>([0, 0]);
   const dragCell = useSharedValue(-1);
-  const panStart = useSharedValue({ x: 0, y: 0 });
-  const pinchStart = useSharedValue({ sc: 1, tx: 0, ty: 0, fx: 0, fy: 0 });
+  // Жесты меняют вид приращениями от прошлого кадра: прокрутка и зум идут одновременно
+  // и не перетирают друг друга (иначе после зума карта «перескакивала»).
+  const pinching = useSharedValue(false);
+  const pinchLast = useSharedValue({ scale: 1, fx: 0, fy: 0, n: 0 });
 
   const handleTap = useCallback(
     (sx: number, sy: number) => {
@@ -233,7 +235,6 @@ export function MapView(props: MapViewProps) {
     minDistance: 6,
     onBegin: (e) => {
       'worklet';
-      panStart.value = { x: tx.value, y: ty.value };
       dragCell.value = -1;
       // Палец на своей армии — тянем стрелку приказа, иначе двигаем карту.
       const mx = (e.x - tx.value) / sc.value;
@@ -270,8 +271,10 @@ export function MapView(props: MapViewProps) {
         dragPoint.value = [(e.x - tx.value) / sc.value, (e.y - ty.value) / sc.value];
         return;
       }
-      tx.value = panStart.value.x + e.translationX;
-      ty.value = panStart.value.y + e.translationY;
+      // Пока идёт зум, им же и двигается карта.
+      if (pinching.value) return;
+      tx.value += e.changeX;
+      ty.value += e.changeY;
       clampView();
     },
     onDeactivate: (e) => {
@@ -295,23 +298,29 @@ export function MapView(props: MapViewProps) {
     enabled: interactive,
     onActivate: (e) => {
       'worklet';
-      pinchStart.value = { sc: sc.value, tx: tx.value, ty: ty.value, fx: e.focalX, fy: e.focalY };
+      pinching.value = true;
+      pinchLast.value = { scale: e.scale, fx: e.focalX, fy: e.focalY, n: e.numberOfPointers };
     },
     onUpdate: (e) => {
       'worklet';
-      const st = pinchStart.value;
+      const last = pinchLast.value;
+      pinchLast.value = { scale: e.scale, fx: e.focalX, fy: e.focalY, n: e.numberOfPointers };
+      // Палец оторвался или добавился — центр жеста скачет, этот кадр пропускаем.
+      if (e.numberOfPointers < 2 || e.numberOfPointers !== last.n || last.scale <= 0) return;
       const s = size.value;
-      const next = Math.min(s.maxSc, Math.max(s.minSc, st.sc * e.scale));
-      // Точка под пальцами остаётся на месте.
-      const mx = (st.fx - st.tx) / st.sc;
-      const my = (st.fy - st.ty) / st.sc;
+      const prev = sc.value;
+      const next = Math.min(s.maxSc, Math.max(s.minSc, prev * (e.scale / last.scale)));
+      const k = next / prev;
+      // Точка карты под пальцами остаётся под пальцами (с учётом их сдвига).
+      tx.value = e.focalX - (last.fx - tx.value) * k;
+      ty.value = e.focalY - (last.fy - ty.value) * k;
       sc.value = next;
-      tx.value = e.focalX - mx * next;
-      ty.value = e.focalY - my * next;
       clampView();
     },
-    onDeactivate: () => {
+    onFinalize: () => {
       'worklet';
+      if (!pinching.value) return;
+      pinching.value = false;
       runOnJS(zoomChanged)(sc.value);
     },
   });
