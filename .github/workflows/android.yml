@@ -34,6 +34,9 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: android-actions/setup-android@v3
+        with:
+          # Пакета `tools` в репозитории SDK больше нет; платформу, build-tools и NDK Gradle докачает сам.
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci
       # Нативный проект генерируется из app.json (Continuous Native Generation).
