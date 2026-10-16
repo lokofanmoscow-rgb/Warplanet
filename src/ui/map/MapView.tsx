@@ -26,6 +26,7 @@ import {
   PlateLayer,
   SeaLayer,
   SelectionLayer,
+  useNoiseTile,
   StartPointsLayer,
   WaterRipple,
   type PlateInfo,
@@ -62,6 +63,7 @@ export function MapView(props: MapViewProps) {
   const { map, game, interactive = true } = props;
   const geo = useMemo(() => getGeometry(map), [map]);
   const images = useSpriteImages();
+  const noise = useNoiseTile();
   const typeface = useTypeface(FONT_SRC);
   const plateFont = useMemo<SkFont | null>(() => (typeface ? Skia.Font(typeface, 13) : null), [typeface]);
   const labelFont = useMemo<SkFont | null>(() => (typeface ? Skia.Font(typeface, 11) : null), [typeface]);
@@ -165,11 +167,14 @@ export function MapView(props: MapViewProps) {
   );
   const zoomChanged = useCallback((z: number) => setZoom(z), []);
 
+  // В функции жестов (UI-поток) передаём только числа, а не весь объект карты с контурами.
+  const mapW = map.width;
+  const mapH = map.height;
   const clampView = () => {
     'worklet';
     const s = size.value;
-    const mw = map.width * sc.value;
-    const mh = map.height * sc.value;
+    const mw = mapW * sc.value;
+    const mh = mapH * sc.value;
     // Карта не уезжает за край дальше поля; меньшая экрана — по центру.
     const margin = 60;
     const loX = Math.min(s.w - mw - margin, (s.w - mw) / 2);
@@ -291,7 +296,7 @@ export function MapView(props: MapViewProps) {
             <Group transform={transform}>
               <SeaLayer geo={geo} />
               <WaterRipple geo={geo} animate={!props.drift} />
-              <LandLayer geo={geo} game={game} ownershipKey={own} />
+              <LandLayer geo={geo} game={game} ownershipKey={own} noise={noise} />
               <DecorLayer geo={geo} images={images} />
               <SelectionLayer geo={geo} cell={props.selected ?? null} targets={props.targets ?? []} />
               <CityLayer geo={geo} game={game} fortKey={forts} images={images} />

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   BlendColor,
   Circle,
@@ -36,12 +36,17 @@ const SPRITE_ENTRIES = Object.entries(SPRITES);
 
 /** Загружает все найденные PNG. Список фиксирован на сборку, поэтому хуки в цикле безопасны. */
 export function useSpriteImages(): SpriteImages {
-  const out: SpriteImages = {};
-  for (const [name, src] of SPRITE_ENTRIES) {
+  const loaded: (SkImage | null)[] = [];
+  for (const [, src] of SPRITE_ENTRIES) {
     // eslint-disable-next-line react-hooks/rules-of-hooks
-    out[name] = useImage(src);
+    loaded.push(useImage(src));
   }
-  return out;
+  // Один и тот же объект, пока картинки не поменялись, — чтобы слои карты не перерисовывались зря.
+  return useMemo(() => {
+    const out: SpriteImages = {};
+    SPRITE_ENTRIES.forEach(([name], i) => (out[name] = loaded[i]));
+    return out;
+  }, loaded); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 const OUTLINE = COLORS.border;

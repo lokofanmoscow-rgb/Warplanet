@@ -66,10 +66,10 @@ export function describeLog(game: GameState, map: MapDef, viewer: PlayerId | nul
         break;
       case 'battle': {
         const where = e.border ? `Встречный бой — ${cell(e.from!)} / ${cell(e.cell)}` : `Бой — ${cell(e.cell)}`;
-        const won = e.winner !== null ? `Победа: ${name(e.winner)}` : 'Обе армии разбиты';
+        const won = e.winner !== null ? `победа: ${name(e.winner)}` : 'обе армии разбиты';
         const involved = mine(e.attacker) || mine(e.defender);
         lines.push({
-          text: `${where}: ${name(e.attacker)} (${e.attack}) против ${e.defender === null ? 'ополчения' : name(e.defender)} (${e.defense}). ${won}`,
+          text: `${where}. Атака: ${name(e.attacker)} (${e.attack}), защита: ${name(e.defender)} (${e.defense}) — ${won}`,
           player: e.winner,
           kind: !involved ? 'info' : mine(e.winner) ? 'good' : 'bad',
         });

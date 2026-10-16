@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getMap, type CellId } from '../../engine';
+import { CONFIG, getMap, type CellId } from '../../engine';
 import type { MatchController } from '../../game/controller';
 import { clearSave } from '../../game/storage';
 import { Button, Panel, RoundButton, T } from '../components';
@@ -144,7 +144,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     if (!c.host.clientConnected) {
       if (c.host.paused) banner = 'Пауза: второй игрок не вернулся. Партия сохранена — можно выйти и продолжить позже.';
       else if (c.host.disconnectedAt !== null) {
-        const left = Math.max(0, 120 - Math.floor((now - c.host.disconnectedAt) / 1000));
+        const left = Math.max(0, Math.floor((CONFIG.net.reconnectWaitMs - (now - c.host.disconnectedAt)) / 1000));
         banner = `Второй игрок отключился. Ждём ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
       }
     } else if (submitted) banner = 'Приказы отданы. Ждём второго игрока…';

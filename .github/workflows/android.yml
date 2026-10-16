@@ -1,0 +1,48 @@
+name: Android APK
+
+# Тесты и сборка APK на каждый пуш. Готовый APK — в артефактах запуска (Actions → запуск → warplanet-apk).
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --ci
+
+  apk:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      # Нативный проект генерируется из app.json (Continuous Native Generation).
+      - run: npx expo prebuild -p android --no-install
+      - name: Сборка APK
+        working-directory: android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a --max-workers=3 --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: warplanet-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30

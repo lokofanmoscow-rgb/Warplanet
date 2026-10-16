@@ -6,6 +6,7 @@ import {
   FractalNoise,
   Group,
   Image,
+  ImageShader,
   Path,
   Rect,
   Shader,
@@ -84,6 +85,33 @@ export function SeaLayer({ geo }: { geo: MapGeometry }) {
   return <SeaElements geo={geo} />;
 }
 
+// ---------- Текстура бумаги: плитка шума, рендерится один раз ----------
+
+let noiseTile: SkImage | null = null;
+let noisePromise: Promise<SkImage | null> | null = null;
+
+export function useNoiseTile(): SkImage | null {
+  const [tile, setTile] = useState<SkImage | null>(noiseTile);
+  useEffect(() => {
+    if (tile) return;
+    noisePromise ??= drawAsImage(
+      <Rect x={0} y={0} width={256} height={256}>
+        <FractalNoise freqX={0.09} freqY={0.09} octaves={3} tileWidth={256} tileHeight={256} />
+      </Rect>,
+      { width: 256, height: 256 },
+    ).catch(() => null);
+    let alive = true;
+    void noisePromise.then((img) => {
+      noiseTile = img;
+      if (alive && img) setTile(img);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [tile]);
+  return tile;
+}
+
 // ---------- Рябь воды: шейдер, анимируется ----------
 
 const RIPPLE = Skia.RuntimeEffect.Make(`
@@ -119,10 +147,12 @@ export const LandLayer = React.memo(function LandLayer({
   geo,
   game,
   ownershipKey,
+  noise,
 }: {
   geo: MapGeometry;
   game: GameState;
   ownershipKey: string;
+  noise: SkImage | null;
 }) {
   const { map } = geo;
   const cells = game.cells;
@@ -136,10 +166,12 @@ export const LandLayer = React.memo(function LandLayer({
       {map.cells.map((c, i) =>
         c.kind === 'land' ? <Path key={c.id} path={geo.cellPaths[i]} color={fillColor(cells[i].owner, game)} /> : null,
       )}
-      {/* Текстура бумаги поверх суши, 10–15%. */}
-      <Path path={geo.landPath} opacity={0.13} blendMode="multiply">
-        <FractalNoise freqX={0.09} freqY={0.09} octaves={3} />
-      </Path>
+      {/* Текстура бумаги поверх суши, 10–15%: готовая плитка шума, а не шейдер на каждый кадр. */}
+      {noise && (
+        <Path path={geo.landPath} opacity={0.14} blendMode="multiply">
+          <ImageShader image={noise} tx="repeat" ty="repeat" />
+        </Path>
+      )}
       {/* Нейтральные провинции: лёгкая диагональная штриховка. */}
       <Group clip={neutral}>
         <Path path={geo.hatch} color="rgba(59,47,47,0.16)" style="stroke" strokeWidth={1.2} />
@@ -221,7 +253,7 @@ export const CityLayer = React.memo(function CityLayer({
 
 // ---------- Подписи ----------
 
-export function LabelLayer({ geo, font, k }: { geo: MapGeometry; font: SkFont | null; k: number }) {
+export const LabelLayer = React.memo(function LabelLayer({ geo, font, k }: { geo: MapGeometry; font: SkFont | null; k: number }) {
   if (!font) return null;
   const size = font.getSize();
   return (
@@ -240,7 +272,7 @@ export function LabelLayer({ geo, font, k }: { geo: MapGeometry; font: SkFont | 
       })}
     </Group>
   );
-}
+});
 
 // ---------- Плашки численности ----------
 
