@@ -69,7 +69,7 @@ export const CONFIG = {
 
   actions: {
     recruit: { ap: 1, goldPerSoldier: 2, popPerSoldier: 100, maxPopShare: 0.1 },
-    fortify: { ap: 2, gold: 30, defenseMult: 2 },
+    fortify: { ap: 1.5, gold: 30, defenseMult: 2 },
     buy: { ap: 1, popPerGold: 200 },
     loot: { ap: 1, popPerGold: 200, popLoss: 0.1, happinessLoss: 20 },
     // Праздник: +happiness счастья в провинции; цена — население / popPerGold, не меньше minGold.
@@ -136,7 +136,7 @@ export const CONFIG = {
   net: {
     port: 47630,
     serviceType: 'conquest',
-    protocolVersion: 3,
+    protocolVersion: 4,
     pingIntervalMs: 5000,
     // Нет данных дольше этого — соединение считается потерянным.
     timeoutMs: 15000,

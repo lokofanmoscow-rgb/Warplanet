@@ -244,6 +244,27 @@ export function HandoffScreen({ game, player, onReady }: { game: GameState; play
   );
 }
 
+/** «Завершить ход?» — чтобы не нажать «Готово» случайно. */
+export function EndTurnDialog({ apLeft, onNo, onYes }: { apLeft: number; onNo: () => void; onYes: () => void }) {
+  const { s } = useLayout();
+  return (
+    <Overlay onDismiss={onNo} maxWidth={360}>
+      <Title size={22} style={{ textAlign: 'center' }}>
+        Завершить ход?
+      </Title>
+      {apLeft > 0 && (
+        <T dim style={{ textAlign: 'center', marginTop: 6 * s }}>
+          Не потрачено {fmtAp(apLeft)} ОД
+        </T>
+      )}
+      <Row gap={10} style={{ marginTop: 16 * s }}>
+        <Button label="Нет" onPress={onNo} style={{ flex: 1 }} />
+        <Button label="Да" variant="primary" icon="check" onPress={onYes} style={{ flex: 1 }} />
+      </Row>
+    </Overlay>
+  );
+}
+
 export function GameMenu({
   canSave,
   onResume,

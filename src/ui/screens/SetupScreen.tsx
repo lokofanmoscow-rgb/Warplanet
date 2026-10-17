@@ -21,12 +21,12 @@ interface Human {
 export function SetupScreen({ mode }: { mode: 'ai' | 'hotseat' }) {
   const { go } = useNav();
   const { s } = useLayout();
-  const mapId = DEFAULT_MAP_ID;
-  const map = getMap(mapId);
   const [settings, setSettings] = useState<LobbySettings>(() => ({
-    ...defaultSetup(mapId),
+    ...defaultSetup(DEFAULT_MAP_ID),
     aiCount: mode === 'ai' ? 4 : 2,
   }));
+  const mapId = settings.mapId;
+  const map = getMap(mapId);
   const [humans, setHumans] = useState<Human[]>(() =>
     mode === 'ai'
       ? [{ name: 'Игрок', start: null }]
@@ -62,6 +62,17 @@ export function SetupScreen({ mode }: { mode: 'ai' | 'hotseat' }) {
     });
     setPicker((p) => Math.min(p, n - 1));
     setSettings((st) => ({ ...st, aiCount: Math.min(st.aiCount, Math.min(CONFIG.players.maxAI, map.startPoints.length - n)) }));
+  };
+
+  const changeSettings = (patch: Partial<LobbySettings>) => {
+    if (patch.mapId !== undefined && patch.mapId !== mapId) {
+      // Новая карта: столицы выбираются заново, ИИ не больше её стартовых точек.
+      const points = getMap(patch.mapId).startPoints.length;
+      setHumans((list) => list.map((h) => ({ ...h, start: null })));
+      setSettings((st) => ({ ...st, ...patch, aiCount: Math.min(st.aiCount, CONFIG.players.maxAI, points - humans.length) }));
+      return;
+    }
+    setSettings((st) => ({ ...st, ...patch }));
   };
 
   const start = () => {
@@ -125,7 +136,7 @@ export function SetupScreen({ mode }: { mode: 'ai' | 'hotseat' }) {
           </Pressable>
         ))}
       </Field>
-      <SettingsForm value={settings} onChange={(p) => setSettings((st) => ({ ...st, ...p }))} minAI={mode === 'ai' ? 1 : 0} maxAI={maxAI} />
+      <SettingsForm value={settings} onChange={changeSettings} minAI={mode === 'ai' ? 1 : 0} maxAI={maxAI} />
     </LobbyLayout>
   );
 }

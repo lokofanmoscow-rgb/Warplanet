@@ -187,6 +187,24 @@ describe('хост и клиент по TCP', () => {
     expect(host.game!.players[1].tax).toBe(80);
   });
 
+  test('смена карты в лобби: столицы сбрасываются, партия идёт на новой карте', async () => {
+    const c = mk(host.port);
+    await waitFor(() => c.status === 'connected' && c.lobby !== null);
+    host.setHostStart(getMap(DEFAULT_MAP_ID).startPoints[0]);
+    c.setStart(getMap(DEFAULT_MAP_ID).startPoints[1]);
+    await waitFor(() => host.lobby.starts[1] !== null);
+    host.setSettings({ mapId: 'africa' });
+    await waitFor(() => c.lobby?.settings.mapId === 'africa');
+    expect(c.lobby!.starts).toEqual([null, null]);
+    const africa = getMap('africa');
+    c.setStart(africa.startPoints[2]);
+    await waitFor(() => host.lobby.starts[1] === africa.startPoints[2]);
+    host.startGame(3);
+    await waitFor(() => c.game !== null);
+    expect(c.game!.mapId).toBe('africa');
+    expect(c.game!.players[1].capital).toBe(africa.startPoints[2]);
+  });
+
   test('хост отбрасывает невозможные приказы клиента', async () => {
     const c = mk(host.port);
     await waitFor(() => c.status === 'connected');

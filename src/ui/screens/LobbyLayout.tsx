@@ -76,7 +76,9 @@ export function LobbyLayout({
   return (
     <View style={[styles.root, { flexDirection: wide ? 'row' : 'column' }]}>
       <View style={{ flex: 1 }}>
+        {/* key: при смене карты вид строится заново и подгоняется под новую карту. */}
         <MapView
+          key={mapId}
           map={map}
           game={game}
           units={[]}

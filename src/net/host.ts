@@ -111,6 +111,8 @@ export class GameHost {
   // ---------- Лобби ----------
 
   setSettings(patch: Partial<LobbySettings>): void {
+    // Другая карта — прежние стартовые точки к ней не относятся.
+    if (patch.mapId !== undefined && patch.mapId !== this.lobby.settings.mapId) this.lobby.starts = [null, null];
     this.lobby.settings = { ...this.lobby.settings, ...patch };
     this.broadcastState();
   }

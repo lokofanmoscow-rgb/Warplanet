@@ -42,7 +42,7 @@ describe('очки действия и действия в провинциях'
     expect(applyAction(s, map, 0, { type: 'recruit', cell: 0, count: 3 }, b)).toMatch(/золота/);
   });
 
-  test('укрепление: 2 ОД и 30 золота, одно на провинцию', () => {
+  test('укрепление: 1,5 ОД и 30 золота, одно на провинцию', () => {
     const s = blankState(map);
     own(s, 0, 0);
     s.players[0].gold = 100;
@@ -50,7 +50,7 @@ describe('очки действия и действия в провинциях'
     expect(applyAction(s, map, 0, { type: 'fortify', cell: 0 }, b)).toBeNull();
     expect(s.cells[0].fortified).toBe(true);
     expect(s.players[0].gold).toBe(70);
-    expect(b.ap).toBe(3);
+    expect(b.ap).toBe(3.5);
     const b2 = newBudget(s, map, 0);
     expect(applyAction(s, map, 0, { type: 'fortify', cell: 0 }, b2)).toMatch(/уже укреплена/);
   });
@@ -121,7 +121,8 @@ describe('очки действия и действия в провинциях'
     expect(b.ap).toBe(5);
     expect(applyAction(s, map, 0, { type: 'fortify', cell: 0 }, b)).toBeNull();
     expect(applyAction(s, map, 0, { type: 'fortify', cell: 1 }, b)).toBeNull();
-    expect(applyAction(s, map, 0, { type: 'loot', cell: 2 }, b)).toBeNull();
+    expect(applyAction(s, map, 0, { type: 'fortify', cell: 2 }, b)).toBeNull();
+    expect(b.ap).toBe(0.5);
     expect(applyAction(s, map, 0, { type: 'loot', cell: 3 }, b)).toMatch(/очков действия/);
   });
 

@@ -6,7 +6,7 @@ import type { MatchController } from '../../game/controller';
 import { clearSave } from '../../game/storage';
 import { Button, Panel, RoundButton, T } from '../components';
 import { newsFor, type NewsItem } from '../describe';
-import { GameMenu, HandoffScreen, LogDialog, MoveDialog, NewsDialog, TaxDialog } from '../game/Dialogs';
+import { EndTurnDialog, GameMenu, HandoffScreen, LogDialog, MoveDialog, NewsDialog, TaxDialog } from '../game/Dialogs';
 import { ProvincePanel } from '../game/ProvincePanel';
 import { TopBar } from '../game/TopBar';
 import { Icon } from '../icons';
@@ -52,6 +52,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   const [taxOpen, setTaxOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [focus, setFocus] = useState<CellId | null>(me?.capital ?? null);
   const [now, setNow] = useState(Date.now());
@@ -132,16 +133,18 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
       if (news) closeNews();
       else if (replay) endReplay();
       else if (chooser) setChooser(null);
-      else if (moveDialog || taxOpen || logOpen) {
+      else if (moveDialog || taxOpen || logOpen || confirmEnd) {
         setMoveDialog(null);
         setTaxOpen(false);
         setLogOpen(false);
-      } else if (selected !== null) setSelected(null);
+        setConfirmEnd(false);
+      } else if (moveFrom !== null) setMoveFrom(null);
+      else if (selected !== null) setSelected(null);
       else setMenuOpen((v) => !v);
       return true;
     });
     return () => sub.remove();
-  }, [moveDialog, taxOpen, logOpen, selected, replay, endReplay, chooser, news, closeNews]);
+  }, [moveDialog, taxOpen, logOpen, confirmEnd, moveFrom, selected, replay, endReplay, chooser, news, closeNews]);
 
   // Конец партии — итоги.
   const finishedSeen = game.finished && !logOpen && !replay && !news;
@@ -297,6 +300,10 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
       />
     ) : null;
 
+  // «Готово» видно, только когда на экране нет панелей и окон — чтобы не нажать его случайно.
+  const windowOpen =
+    panel !== null || chooser !== null || moveFrom !== null || moveDialog !== null || taxOpen || logOpen || menuOpen || news !== null || confirmEnd;
+
   return (
     <View style={styles.root}>
       <MapView
@@ -419,7 +426,9 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
               </View>
             )}
             <RoundButton icon="undo" label="Отменить последний" size={52} disabled={!c.canUndo} onPress={() => c.undo()} />
-            <RoundButton icon="check" label="Готово" size={68} active={editable} disabled={!editable} onPress={() => c.ready()} />
+            {!windowOpen && (
+              <RoundButton icon="check" label="Готово" size={68} active={editable} disabled={!editable} onPress={() => setConfirmEnd(true)} />
+            )}
           </View>
         </>
       )}
@@ -472,6 +481,16 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
           viewer={c.mode === 'hotseat' ? null : player}
           visible={c.mode === 'hotseat' ? null : visibleCells(game, map, player)}
           onClose={() => setLogOpen(false)}
+        />
+      )}
+      {confirmEnd && (
+        <EndTurnDialog
+          apLeft={plan.apLeft}
+          onNo={() => setConfirmEnd(false)}
+          onYes={() => {
+            setConfirmEnd(false);
+            if (c.canEdit()) c.ready();
+          }}
         />
       )}
       {news && <NewsDialog war={news.war} items={news.items} onClose={closeNews} />}

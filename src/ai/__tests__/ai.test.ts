@@ -2,8 +2,8 @@ import { CONFIG, createGame, happinessTarget, ownedLandCount, resolveTurn, simul
 import { getMap, DEFAULT_MAP_ID } from '../../maps';
 import { aiTax, planAllAI, planOrders } from '../planOrders';
 
-function aiGame(count: number, seed: number, difficulty: 'easy' | 'medium' | 'hard' = 'medium'): GameState {
-  const map = getMap(DEFAULT_MAP_ID);
+function aiGame(count: number, seed: number, difficulty: 'easy' | 'medium' | 'hard' = 'medium', mapId = DEFAULT_MAP_ID): GameState {
+  const map = getMap(mapId);
   return createGame({
     map,
     seed,
@@ -64,6 +64,23 @@ describe('ИИ-соперники', () => {
     expect(s.finished || s.players.some((p) => !p.alive)).toBe(true);
     // 300 мс на среднем телефоне; на компьютере с запасом.
     expect(worst).toBeLessThan(300);
+  });
+
+  test('на карте Африки (клетка = страна) ИИ тоже играет: приказы верны, земля разбирается', () => {
+    let s = aiGame(6, 77, 'hard', 'africa');
+    const map = getMap('africa');
+    for (let turn = 0; turn < 60 && !s.finished; turn++) {
+      if (turn % 10 === 0) {
+        for (const p of s.players.filter((x) => x.alive)) {
+          const plan = simulatePlan(s, p.id, planOrders(s, p.id, 'hard'));
+          expect(plan.actionErrors.every((e) => e === null)).toBe(true);
+          expect(plan.moveErrors.every((e) => e === null)).toBe(true);
+        }
+      }
+      s = resolveTurn(s, planAllAI(s));
+    }
+    const owned = s.players.reduce((sum, p) => sum + ownedLandCount(s, map, p.id), 0);
+    expect(owned).toBeGreaterThan(20);
   });
 
   test('сильный ИИ обычно обыгрывает лёгких', () => {

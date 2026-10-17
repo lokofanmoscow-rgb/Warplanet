@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { geoConicConformal } from 'd3-geo';
+import { geoAzimuthalEqualArea, geoConicConformal } from 'd3-geo';
 import { Delaunay } from 'd3-delaunay';
 import mapshaper from 'mapshaper';
 import polylabel from 'polylabel';
@@ -76,8 +76,12 @@ async function loadPlay(list, clip, files = {}) {
 // среза по меридиану и серой «ничейной» земли у края.
 const preRegions = await loadPlay(cfg.frameCountries ?? cfg.countries, `bbox=${cfg.bbox.join(',')}`);
 
-const projection = geoConicConformal()
-  .parallels(cfg.projection.parallels)
+// Коническая подходит для средних широт (Европа); у экватора — азимутальная равновеликая.
+const projection = (
+  cfg.projection.type === 'azimuthalEqualArea'
+    ? geoAzimuthalEqualArea()
+    : geoConicConformal().parallels(cfg.projection.parallels)
+)
   .rotate(cfg.projection.rotate)
   .scale(1000)
   .translate([0, 0]);
@@ -167,6 +171,9 @@ const allPlaces = places.features.map((f) => ({
   at: f.geometry.coordinates,
 }));
 
+// Русское название страны (короткое из настроек, если задано).
+const countryName = (code) => cfg.countryNames?.[code] ?? admin0.find((c) => c.ADM0_A3 === code)?.NAME_RU ?? code;
+
 const country = {};
 for (const code of [...cfg.countries, ...separateCodes]) {
   const regs = regions.filter((r) => r.properties.adm0_a3 === code);
@@ -189,8 +196,10 @@ for (const code of [...cfg.countries, ...separateCodes]) {
 // ---------- 2. Провинции ----------
 
 log('2. Провинции…');
+// onePerCountry: каждая страна — одна провинция целиком (с островами), без разбиения.
+const splitCountries = !cfg.onePerCountry;
 // Компоненты связности каждой страны: общие границы + узкие проливы.
-for (const c of Object.values(country)) {
+for (const c of splitCountries ? Object.values(country) : []) {
   const regs = c.regions;
   const adj = sharedVertexAdjacency(regs.map((r) => r.geometry));
   const comp = new Array(regs.length).fill(-1);
@@ -278,17 +287,25 @@ function allocate(unit) {
   return total;
 }
 let lo = 1, hi = 1e9, unit = 1;
-for (let it = 0; it < 60; it++) {
-  unit = Math.sqrt(lo * hi);
-  if (allocate(unit) > cfg.targetProvinces) lo = unit; else hi = unit;
+if (splitCountries) {
+  for (let it = 0; it < 60; it++) {
+    unit = Math.sqrt(lo * hi);
+    if (allocate(unit) > cfg.targetProvinces) lo = unit; else hi = unit;
+  }
+  log(`   провинций суши: ${allocate(hi)}`);
 }
-const totalProv = allocate(hi);
-log(`   провинций суши: ${totalProv}`);
 
 // Разбиение компонент на группы.
 let provCount = 0;
 const provOfRegion = new Map();
-for (const c of Object.values(country)) {
+if (!splitCountries) {
+  for (const c of Object.values(country)) {
+    if (!c.regions.length) continue;
+    for (const r of c.regions) provOfRegion.set(r, provCount);
+    provCount++;
+  }
+}
+for (const c of splitCountries ? Object.values(country) : []) {
   const lat0 = (c.regions.reduce((s, r) => s + r.lonlat[1], 0) / Math.max(1, c.regions.length)) * Math.PI / 180;
   const node = (r) => ({ area: r.area, x: r.lonlat[0] * Math.cos(lat0) * 111.32, y: r.lonlat[1] * 110.57 });
   // Число групп по компонентам — пропорционально площади, минимум одна.
@@ -328,7 +345,8 @@ log(`   групп: ${provCount}`);
 log('   фоновая суша…');
 // Страны не из списка; убранные (dropBackground) — просто море.
 const hidden = q([...cfg.countries, ...(cfg.dropBackground ?? [])]);
-const { bg } = await ms(
+// background: false — вокруг только вода, чужой суши нет вовсе.
+const { bg } = cfg.background === false ? { bg: null } : await ms(
   `-i ${shp('ne_10m_admin_1_states_provinces')} name=bg ` +
     `-each ${q(mergeExpr)} ` +
     `-filter ${q(`${hidden}.indexOf(adm0_a3) == -1`)} ` +
@@ -518,6 +536,8 @@ for (const c of landCells) {
   const pick = cand.find((p) => !used.has(p.NAME_RU));
   if (c.separateName) {
     c.name = c.separateName;
+  } else if (cfg.nameBy === 'country') {
+    c.name = countryName(c.adm0);
   } else if (pick) {
     c.name = pick.NAME_RU;
   } else {
@@ -595,9 +615,7 @@ const result = {
   startPoints,
   straits,
   // Русские названия стран — так называются ИИ-соперники по своей столице.
-  countries: Object.fromEntries(
-    cfg.countries.map((code) => [code, admin0.find((c) => c.ADM0_A3 === code)?.NAME_RU ?? code]),
-  ),
+  countries: Object.fromEntries(cfg.countries.map((code) => [code, countryName(code)])),
   decor: {
     mountains: (cfg.mountains ?? [])
       .map((p) => projection(p))

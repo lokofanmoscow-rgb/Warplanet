@@ -1,5 +1,6 @@
 import React from 'react';
-import { CONFIG, DIFFICULTIES, type Difficulty, type VictoryType } from '../../engine';
+import { CONFIG, DIFFICULTIES, getMap, type Difficulty, type VictoryType } from '../../engine';
+import { MAPS } from '../../maps';
 import type { LobbySettings } from '../../net/protocol';
 import { Field, Segmented, Stepper, T } from '../components';
 
@@ -19,7 +20,12 @@ export const VICTORY_HINT: Record<VictoryType, string> = {
 
 const LIMITS = [0, 30, 50, 100];
 
-/** Настройки партии: число и сложность ИИ, условие победы, лимит ходов. */
+const MAP_HINT: Record<string, string> = {
+  europe: 'Страны поделены на провинции, рядом моря и проливы',
+  africa: 'Каждая страна — одна клетка, вокруг только океан',
+};
+
+/** Настройки партии: карта, число и сложность ИИ, условие победы, лимит ходов. */
 export function SettingsForm({
   value,
   onChange,
@@ -37,6 +43,9 @@ export function SettingsForm({
   if (readOnly) {
     return (
       <>
+        <Field label="Карта">
+          <T>{getMap(value.mapId).name}</T>
+        </Field>
         <Field label="Соперники">
           <T>
             ИИ: {value.aiCount}, сложность: {CONFIG.ai.difficulties[value.aiDifficulty].label.toLowerCase()}
@@ -57,6 +66,9 @@ export function SettingsForm({
   }
   return (
     <>
+      <Field label="Карта" hint={MAP_HINT[value.mapId]}>
+        <Segmented<string> options={MAPS.map((m) => ({ value: m.id, label: m.name }))} value={value.mapId} onChange={(mapId) => set({ mapId })} />
+      </Field>
       <Field label="Число ИИ-соперников">
         <Stepper value={value.aiCount} min={minAI} max={maxAI} onChange={(aiCount) => set({ aiCount })} />
       </Field>

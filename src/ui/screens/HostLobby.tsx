@@ -24,10 +24,10 @@ export function HostLobby() {
   const [error, setError] = useState<string | null>(null);
   const handed = useRef(false);
   const unpublishRef = useRef<() => void>(() => {});
-  const mapId = DEFAULT_MAP_ID;
-  const map = getMap(mapId);
-
   useSyncExternalStore(host ? (fn) => host.subscribe(fn) : noop, () => (host ? JSON.stringify(host.lobby) : ''));
+  // Карту выбирают в настройках лобби; хост создаётся один раз с картой по умолчанию.
+  const mapId = host?.lobby.settings.mapId ?? DEFAULT_MAP_ID;
+  const map = getMap(mapId);
 
   useEffect(() => {
     let created: GameHost | null = null;
@@ -35,7 +35,7 @@ export function HostLobby() {
     (async () => {
       try {
         const name = await getPlayerName();
-        const { host: h, unpublish } = await createHost(name, mapId);
+        const { host: h, unpublish } = await createHost(name, DEFAULT_MAP_ID);
         created = h;
         unpublishRef.current = unpublish;
         if (!alive) {
@@ -57,7 +57,7 @@ export function HostLobby() {
         unpublishRef.current();
       }
     };
-  }, [mapId]);
+  }, []);
 
   const lobby = host?.lobby;
   const start = () => {
