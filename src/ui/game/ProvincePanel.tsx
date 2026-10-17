@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import {
+  actionGold,
   buyCost,
   CONFIG,
   happinessTarget,
@@ -215,7 +216,7 @@ export function ProvincePanel({
             {planned.map(({ a, i }) => (
               <OrderRow
                 key={`a${i}`}
-                text={`${ACTION_LABEL[a.type]}${a.type === 'recruit' ? ` ${a.count}` : ''}`}
+                text={`${ACTION_LABEL[a.type]}${a.type === 'recruit' ? ` ${a.count}` : ''}${actionGold(game, a) > 0 ? ` · −${actionGold(game, a)} зол.` : ''}`}
                 onRemove={editable ? () => controller.removeAction(i) : undefined}
               />
             ))}
