@@ -103,6 +103,8 @@ export interface GameState {
   log: TurnEvent[];
   /** Число провинций у каждого игрока после каждого хода. */
   history: number[][];
+  /** Пары игроков в состоянии войны (меньший id первым). В старых сохранениях поля нет — мир. */
+  wars?: [PlayerId, PlayerId][];
   finished: boolean;
   winner: PlayerId | null;
   endReason?: EndReason;
@@ -122,7 +124,8 @@ export type Action =
   | { type: 'recruit'; cell: CellId; count: number }
   | { type: 'fortify'; cell: CellId }
   | { type: 'buy'; cell: CellId }
-  | { type: 'loot'; cell: CellId };
+  | { type: 'loot'; cell: CellId }
+  | { type: 'festival'; cell: CellId };
 
 export type ActionType = Action['type'];
 
@@ -136,7 +139,15 @@ export interface PlayerOrders {
   tax: number;
   actions: Action[];
   moves: Move[];
+  /** Кому игрок объявляет войну в этом ходу. */
+  wars?: PlayerId[];
 }
+
+/**
+ * Вид перемещения: march — по своей земле, embark — посадка на корабли, sail — флот по морю,
+ * land — высадка на свою землю; attack — в чужую сушу, naval — на вражеский флот.
+ */
+export type MoveKind = 'march' | 'embark' | 'sail' | 'land' | 'attack' | 'naval';
 
 export type OrdersByPlayer = Record<PlayerId, PlayerOrders>;
 
@@ -149,12 +160,18 @@ export type TurnEvent =
   | { t: 'fortify'; player: PlayerId; cell: CellId }
   | { t: 'buy'; player: PlayerId; cell: CellId; cost: number }
   | { t: 'loot'; player: PlayerId; cell: CellId; gold: number }
+  | { t: 'festival'; player: PlayerId; cell: CellId }
+  | { t: 'war'; player: PlayerId; target: PlayerId }
   | {
       t: 'battle';
       cell: CellId;
       /** Для боя на границе — откуда шёл атакующий. */
       from?: CellId;
       border?: boolean;
+      /** Клетки, откуда атакующий вошёл в бой (последний шаг перед целью). */
+      fromCells?: CellId[];
+      /** То же для защитника, если он сам пришёл в эту клетку в этом ходу. */
+      defFromCells?: CellId[];
       attacker: PlayerId;
       defender: PlayerId | null;
       attack: number;

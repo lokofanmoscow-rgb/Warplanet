@@ -72,6 +72,9 @@ export function blankState(map: MapDef, players = 2): GameState {
     p.gold = 1000;
     p.capital = null;
   });
+  // В тестах боёв все воюют со всеми; тесты объявления войны сбрасывают это сами.
+  state.wars = [];
+  for (let a = 0; a < players; a++) for (let b = a + 1; b < players; b++) state.wars.push([a, b]);
   return state;
 }
 
@@ -81,7 +84,7 @@ export function own(state: GameState, cell: number, owner: number | null, troops
 }
 
 export function orders(partial: Partial<PlayerOrders> & { tax?: number }): PlayerOrders {
-  return { tax: partial.tax ?? 0, actions: partial.actions ?? [], moves: partial.moves ?? [] };
+  return { tax: partial.tax ?? 0, actions: partial.actions ?? [], moves: partial.moves ?? [], wars: partial.wars ?? [] };
 }
 
 export function ordersFor(state: GameState, map: Record<number, Partial<PlayerOrders>>): OrdersByPlayer {

@@ -1,21 +1,104 @@
 import { fight, type Fighter } from './battle';
 import { CONFIG } from './config';
 import type { Rng } from './rng';
-import type { CellId, GameState, MapDef, Move, PlayerId, TurnEvent } from './types';
+import type { CellId, GameState, MapDef, Move, MoveKind, PlayerId, TurnEvent } from './types';
+import { atWar } from './war';
 
-interface Flow {
-  player: PlayerId;
-  from: CellId;
-  to: CellId;
-  count: number;
+const M = CONFIG.move;
+
+export interface Reach {
+  kind: MoveKind;
+  /** Путь от исходной клетки до цели включительно. */
+  path: CellId[];
 }
 
-interface Group {
-  player: PlayerId;
-  troops: number;
+/** Мирные перемещения выполняются сразу (и видны на карте ещё до «Готово»), остальные — бои. */
+export function isPeaceful(kind: MoveKind): boolean {
+  return kind !== 'attack' && kind !== 'naval';
 }
 
-/** Ошибка приказа на движение для текущих доступных солдат; null — можно. */
+function fleetOwner(state: GameState, id: CellId): PlayerId | null {
+  const c = state.cells[id];
+  return c.troops > 0 ? c.owner : null;
+}
+
+/**
+ * Куда может пойти армия игрока из клетки from по текущему состоянию.
+ * Суша: по своей земле до landRange шагов; последним шагом — в чужую сушу (нейтральную или страны,
+ * с которой идёт война) или в море (посадка на корабли).
+ * Флот: по свободному или своему морю до seaRange шагов; последним шагом — высадка или бой с вражеским флотом.
+ */
+export function reachable(state: GameState, map: MapDef, playerId: PlayerId, from: CellId): Map<CellId, Reach> {
+  const out = new Map<CellId, Reach>();
+  const start = map.cells[from];
+  if (!start || state.cells[from].owner !== playerId) return out;
+  const hostile = (owner: PlayerId | null) => owner !== null && owner !== playerId && atWar(state, playerId, owner);
+  const sea = start.kind === 'sea';
+  const range = sea ? M.seaRange : M.landRange;
+  const prev = new Map<CellId, CellId>();
+  const dist = new Map<CellId, number>([[from, 0]]);
+  const pathTo = (end: CellId, last: CellId): CellId[] => {
+    const p = [end];
+    for (let c: CellId | undefined = last; c !== undefined; c = prev.get(c)) p.push(c);
+    return p.reverse();
+  };
+
+  const queue = [from];
+  for (let i = 0; i < queue.length; i++) {
+    const u = queue[i];
+    const d = dist.get(u)!;
+    if (d >= range) continue;
+    for (const n of map.cells[u].neighbors) {
+      if (dist.has(n) || out.has(n)) continue;
+      const land = map.cells[n].kind === 'land';
+      const owner = land ? state.cells[n].owner : fleetOwner(state, n);
+      let kind: MoveKind | null = null;
+      if (owner !== null && owner !== playerId && !hostile(owner)) continue;
+      if (!sea) {
+        if (land) kind = owner === playerId ? 'march' : 'attack';
+        else kind = owner === null || owner === playerId ? 'embark' : 'naval';
+      } else if (land) {
+        kind = owner === playerId ? 'land' : 'attack';
+      } else {
+        kind = owner === null || owner === playerId ? 'sail' : 'naval';
+      }
+      out.set(n, { kind, path: pathTo(n, u) });
+      // Дальше идём только по своей земле или по свободному морю.
+      if (kind === 'march' || kind === 'sail') {
+        dist.set(n, d + 1);
+        prev.set(n, u);
+        queue.push(n);
+      }
+    }
+  }
+  return out;
+}
+
+/** Понятная причина, почему армия не может туда пойти. */
+export function moveBlockReason(state: GameState, map: MapDef, playerId: PlayerId, from: CellId, to: CellId): string {
+  const a = map.cells[from];
+  const b = map.cells[to];
+  if (!a || !b) return 'Нет такой клетки';
+  if (from === to) return 'Армия уже здесь';
+  const owner = b.kind === 'land' ? state.cells[to].owner : fleetOwner(state, to);
+  if (owner !== null && owner !== playerId && !atWar(state, playerId, owner)) {
+    return `Сначала объявите войну: нажмите на провинцию страны «${state.players[owner].name}»`;
+  }
+  if (a.kind === 'land') {
+    if (b.kind === 'sea') return 'На корабли можно сесть только в море у вашего берега';
+    if (owner !== playerId) return 'В чужую провинцию — только в соседнюю с вашей землёй, дальше по одной за ход';
+    return `По своей земле — не дальше ${M.landRange} клеток`;
+  }
+  if (b.kind === 'sea') return `Флот проходит не больше ${M.seaRange} морских клеток, вражеский флот не обойти`;
+  return 'Высадиться можно только на берег у пути флота';
+}
+
+/** Посадка на корабли стоит золото за каждого солдата. */
+export function moveGold(map: MapDef, move: Move): number {
+  return map.cells[move.from]?.kind === 'land' && map.cells[move.to]?.kind === 'sea' ? move.count * M.embarkGoldPerSoldier : 0;
+}
+
+/** Ошибка приказа для доступных солдат; null — можно. */
 export function moveError(
   state: GameState,
   map: MapDef,
@@ -23,13 +106,65 @@ export function moveError(
   move: Move,
   available: number,
 ): string | null {
-  const from = map.cells[move.from];
-  if (!from || !map.cells[move.to]) return 'Нет такой клетки';
+  if (!map.cells[move.from] || !map.cells[move.to]) return 'Нет такой клетки';
   if (state.cells[move.from].owner !== playerId) return 'Здесь нет вашей армии';
-  if (!from.neighbors.includes(move.to)) return 'Армия идёт только на соседнюю клетку';
   if (!Number.isInteger(move.count) || move.count < 1) return 'Неверное число солдат';
   if (move.count > available) return 'Недостаточно солдат';
+  if (!reachable(state, map, playerId, move.from).has(move.to)) return moveBlockReason(state, map, playerId, move.from, move.to);
   return null;
+}
+
+function leave(state: GameState, map: MapDef, id: CellId, count: number): void {
+  const cell = state.cells[id];
+  cell.troops -= count;
+  if (map.cells[id].kind === 'sea' && cell.troops <= 0) {
+    cell.troops = 0;
+    cell.owner = null;
+  }
+}
+
+/**
+ * Проверяет и выполняет один приказ: тратит ОД и золото на посадку, армия выходит из клетки;
+ * мирное перемещение сразу приходит на место. Возвращает путь или ошибку.
+ */
+export function stepMove(
+  state: GameState,
+  map: MapDef,
+  playerId: PlayerId,
+  move: Move,
+  available: number,
+  budget: { ap: number },
+): { error: string; reach?: undefined } | { error: null; reach: Reach } {
+  const error = moveError(state, map, playerId, move, available);
+  if (error) return { error };
+  if (budget.ap < M.ap - 1e-9) return { error: 'Не хватает очков действия' };
+  const player = state.players[playerId];
+  const gold = moveGold(map, move);
+  if (player.gold < gold) return { error: 'Не хватает золота на корабли' };
+  const reach = reachable(state, map, playerId, move.from).get(move.to)!;
+  budget.ap -= M.ap;
+  player.gold -= gold;
+  leave(state, map, move.from, move.count);
+  if (isPeaceful(reach.kind)) {
+    const cell = state.cells[move.to];
+    cell.troops += move.count;
+    if (map.cells[move.to].kind === 'sea') cell.owner = playerId;
+  }
+  return { error: null, reach };
+}
+
+interface Flow {
+  player: PlayerId;
+  /** Последняя клетка перед целью — отсюда армия входит в бой. */
+  stage: CellId;
+  to: CellId;
+  count: number;
+}
+
+interface Group {
+  player: PlayerId;
+  troops: number;
+  from: CellId[];
 }
 
 function strengthAt(map: MapDef, cell: CellId): number {
@@ -37,9 +172,10 @@ function strengthAt(map: MapDef, cell: CellId): number {
 }
 
 /**
- * Шаги 4–5: движение армий на одну клетку и бои.
- * Сначала все армии выходят, затем бои на границах (встречное движение),
- * затем в каждой клетке бьются атакующие от слабейшего к сильнейшему, выживший атакует защитника.
+ * Шаги 4–5: перемещения и бои.
+ * Игроки по очереди (случайной) выполняют приказы: мирные перемещения — сразу, армии для атаки выходят.
+ * Затем бои на границах (встречные атаки), затем в каждой клетке бьются атакующие от слабейшего
+ * к сильнейшему, выживший атакует защитника. apLeft — ОД игроков после действий.
  */
 export function resolveMovement(
   state: GameState,
@@ -47,50 +183,47 @@ export function resolveMovement(
   movesByPlayer: Map<PlayerId, Move[]>,
   rng: Rng,
   log: TurnEvent[],
+  apLeft: Map<PlayerId, number> = new Map(),
 ): void {
-  // 1. Проверка и сложение приказов. Несколько приказов по одной границе — один поток.
+  // 1. Приказы. Несколько атак через одну границу — один поток.
+  const start = state.cells.map((c) => ({ owner: c.owner, troops: c.troops }));
   const flows = new Map<string, Flow>();
-  const ids = [...movesByPlayer.keys()].sort((a, b) => a - b);
+  const ids = rng.shuffle([...movesByPlayer.keys()].sort((a, b) => a - b));
   for (const player of ids) {
     const left = new Map<CellId, number>();
+    const budget = { ap: apLeft.get(player) ?? Infinity };
     for (const move of movesByPlayer.get(player) ?? []) {
-      const cell = state.cells[move.from];
-      if (!cell) continue;
-      const available = left.get(move.from) ?? (cell.owner === player ? cell.troops : 0);
+      if (!state.cells[move.from] || !map.cells[move.to]) continue;
+      const available = left.get(move.from) ?? (start[move.from].owner === player ? start[move.from].troops : 0);
       const count = Math.min(Math.floor(move.count), available);
-      if (moveError(state, map, player, { ...move, count }, available) !== null) continue;
+      const r = stepMove(state, map, player, { ...move, count }, available, budget);
+      if (r.error !== null) continue;
       left.set(move.from, available - count);
-      const key = `${player}:${move.from}>${move.to}`;
+      if (isPeaceful(r.reach.kind)) continue;
+      const stage = r.reach.path[r.reach.path.length - 2];
+      const key = `${player}:${stage}>${move.to}`;
       const flow = flows.get(key);
       if (flow) flow.count += count;
-      else flows.set(key, { player, from: move.from, to: move.to, count });
+      else flows.set(key, { player, stage, to: move.to, count });
     }
   }
 
-  // 2. Армии выходят из клеток.
-  for (const flow of flows.values()) {
-    const cell = state.cells[flow.from];
-    cell.troops -= flow.count;
-    if (map.cells[flow.from].kind === 'sea' && cell.troops <= 0) {
-      cell.troops = 0;
-      cell.owner = null;
-    }
-  }
-
-  // 3. Встречное движение через одну границу — бой на границе, победитель идёт дальше.
-  const list = [...flows.values()].sort((a, b) => a.from - b.from || a.to - b.to || a.player - b.player);
+  // 2. Встречные атаки через одну границу — бой на границе, победитель идёт дальше.
+  const list = [...flows.values()].sort((a, b) => a.stage - b.stage || a.to - b.to || a.player - b.player);
   for (const f of list) {
-    if (f.count <= 0 || f.from > f.to) continue;
-    const g = list.find((x) => x.from === f.to && x.to === f.from && x.player !== f.player && x.count > 0);
+    if (f.count <= 0 || f.stage > f.to) continue;
+    const g = list.find((x) => x.stage === f.to && x.to === f.stage && x.player !== f.player && x.count > 0);
     if (!g) continue;
-    const both = map.cells[f.from].kind === 'sea' && map.cells[f.to].kind === 'sea';
+    const both = map.cells[f.stage].kind === 'sea' && map.cells[f.to].kind === 'sea';
     const strength = both ? CONFIG.battle.seaStrength : 1;
     const r = fight(rng, { troops: f.count, strength, fort: 1 }, { troops: g.count, strength, fort: 1 }, false);
     log.push({
       t: 'battle',
       cell: f.to,
-      from: f.from,
+      from: f.stage,
       border: true,
+      fromCells: [f.stage],
+      defFromCells: [g.stage],
       attacker: f.player,
       defender: g.player,
       attack: f.count,
@@ -105,16 +238,20 @@ export function resolveMovement(
     g.count = r.bLeft;
   }
 
-  // 4. Прибытие: суммируем армии каждого игрока по клеткам назначения.
-  const arrivals = new Map<CellId, Map<PlayerId, number>>();
+  // 3. Прибытие: суммируем армии каждого игрока по клеткам назначения.
+  const arrivals = new Map<CellId, Map<PlayerId, Group>>();
   for (const f of list) {
     if (f.count <= 0) continue;
     let byPlayer = arrivals.get(f.to);
     if (!byPlayer) arrivals.set(f.to, (byPlayer = new Map()));
-    byPlayer.set(f.player, (byPlayer.get(f.player) ?? 0) + f.count);
+    const g = byPlayer.get(f.player);
+    if (g) {
+      g.troops += f.count;
+      if (!g.from.includes(f.stage)) g.from.push(f.stage);
+    } else byPlayer.set(f.player, { player: f.player, troops: f.count, from: [f.stage] });
   }
 
-  // 5. Бои в клетках.
+  // 4. Бои в клетках.
   const targets = [...arrivals.keys()].sort((a, b) => a - b);
   for (const target of targets) {
     resolveCell(state, map, target, arrivals.get(target)!, rng, log);
@@ -125,7 +262,7 @@ function resolveCell(
   state: GameState,
   map: MapDef,
   target: CellId,
-  byPlayer: Map<PlayerId, number>,
+  byPlayer: Map<PlayerId, Group>,
   rng: Rng,
   log: TurnEvent[],
 ): void {
@@ -135,11 +272,10 @@ function resolveCell(
 
   // Свои армии, пришедшие в свою клетку, усиливают гарнизон.
   if (cell.owner !== null && byPlayer.has(cell.owner)) {
-    cell.troops += byPlayer.get(cell.owner)!;
+    cell.troops += byPlayer.get(cell.owner)!.troops;
     byPlayer.delete(cell.owner);
   }
-  const attackers: Group[] = [...byPlayer.entries()]
-    .map(([player, troops]) => ({ player, troops }))
+  const attackers: Group[] = [...byPlayer.values()]
     .filter((g) => g.troops > 0)
     .sort((a, b) => a.troops - b.troops || a.player - b.player);
   if (attackers.length === 0) return;
@@ -155,6 +291,8 @@ function resolveCell(
     log.push({
       t: 'battle',
       cell: target,
+      fromCells: next.from,
+      defFromCells: survivor.from,
       attacker: next.player,
       defender: survivor.player,
       attack: next.troops,
@@ -166,7 +304,7 @@ function resolveCell(
       defenderLeft: r.aLeft,
     });
     if (r.winner === 'a') survivor.troops = r.aLeft;
-    else if (r.winner === 'b') survivor = { player: next.player, troops: r.bLeft };
+    else if (r.winner === 'b') survivor = { ...next, troops: r.bLeft };
     else survivor = null;
   }
   if (!survivor) return;
@@ -180,6 +318,7 @@ function resolveCell(
     log.push({
       t: 'battle',
       cell: target,
+      fromCells: survivor.from,
       attacker: survivor.player,
       defender,
       attack: survivor.troops,

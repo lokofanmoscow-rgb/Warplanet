@@ -134,6 +134,7 @@ export function createGame(opts: NewGameOptions): GameState {
     flag: { holder: null, turns: 0 },
     log: [],
     history: [players.map((p) => cells.filter((c, i) => c.owner === p.id && map.cells[i].kind === 'land').length)],
+    wars: [],
     finished: false,
     winner: null,
   };

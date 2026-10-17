@@ -8,6 +8,7 @@ export const ACTION_AP: Record<ActionType, number> = {
   fortify: A.fortify.ap,
   buy: A.buy.ap,
   loot: A.loot.ap,
+  festival: A.festival.ap,
 };
 
 export function ownedLandCount(state: GameState, map: MapDef, playerId: PlayerId): number {
@@ -36,6 +37,10 @@ export function lootGold(pop: number): number {
   return Math.floor(pop / A.loot.popPerGold);
 }
 
+export function festivalCost(pop: number): number {
+  return Math.max(A.festival.minGold, Math.ceil(pop / A.festival.popPerGold));
+}
+
 export function actionGold(state: GameState, action: Action): number {
   switch (action.type) {
     case 'recruit':
@@ -46,6 +51,8 @@ export function actionGold(state: GameState, action: Action): number {
       return buyCost(state.cells[action.cell].pop);
     case 'loot':
       return 0;
+    case 'festival':
+      return festivalCost(state.cells[action.cell].pop);
   }
 }
 
@@ -80,7 +87,7 @@ export function actionError(
   if (!def || !cell || !player) return 'Нет такой провинции';
   if (def.kind !== 'land') return 'Только на суше';
   if (budget.used.has(actionKey(action))) return 'Уже есть такое действие в этой провинции';
-  if (budget.ap < ACTION_AP[action.type]) return 'Не хватает очков действия';
+  if (budget.ap < ACTION_AP[action.type] - 1e-9) return 'Не хватает очков действия';
   const gold = actionGold(state, action);
   if (player.gold < gold) return 'Не хватает золота';
 
@@ -106,6 +113,11 @@ export function actionError(
     }
     case 'loot': {
       if (cell.owner !== playerId) return 'Грабить можно только свою провинцию';
+      return null;
+    }
+    case 'festival': {
+      if (cell.owner !== playerId) return 'Праздник — только в своей провинции';
+      if (cell.happiness >= 100) return 'Счастье уже 100%';
       return null;
     }
   }
@@ -153,6 +165,10 @@ export function applyAction(
       log?.push({ t: 'loot', player: playerId, cell: action.cell, gold: gain });
       break;
     }
+    case 'festival':
+      cell.happiness = Math.min(100, cell.happiness + A.festival.happiness);
+      log?.push({ t: 'festival', player: playerId, cell: action.cell });
+      break;
   }
   return null;
 }

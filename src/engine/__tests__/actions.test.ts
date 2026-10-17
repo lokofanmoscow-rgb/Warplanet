@@ -140,7 +140,8 @@ describe('очки действия и действия в провинциях'
     expect(plan.actionErrors).toEqual([null]);
     expect(plan.moveErrors).toEqual([null]);
     expect(plan.goldLeft).toBe(0);
-    expect(plan.apLeft).toBe(4);
+    // найм 1 ОД + перемещение 0,5 ОД
+    expect(plan.apLeft).toBe(3.5);
   });
 
   test('хост отбрасывает невозможные приказы клиента', () => {

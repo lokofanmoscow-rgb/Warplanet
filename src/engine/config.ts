@@ -68,6 +68,24 @@ export const CONFIG = {
     fortify: { ap: 2, gold: 30, defenseMult: 2 },
     buy: { ap: 1, popPerGold: 200 },
     loot: { ap: 1, popPerGold: 200, popLoss: 0.1, happinessLoss: 20 },
+    // Праздник: +happiness счастья в провинции; цена — население / popPerGold, не меньше minGold.
+    festival: { ap: 0.5, popPerGold: 2000, minGold: 5, happiness: 20 },
+  },
+
+  move: {
+    // Каждый приказ на перемещение стоит столько ОД (ОД бывают дробными).
+    ap: 0.5,
+    // Армия идёт по своей земле до landRange клеток; в чужую — только последним шагом.
+    landRange: 4,
+    // Флот проходит до seaRange морских клеток (высадка — последним шагом).
+    seaRange: 5,
+    // Посадка на корабли: золото за каждого солдата.
+    embarkGoldPerSoldier: 2,
+  },
+
+  war: {
+    // Объявивший войну теряет столько счастья во всех своих провинциях; на кого напали — нет.
+    happinessLoss: 10,
   },
 
   battle: {
@@ -101,7 +119,7 @@ export const CONFIG = {
   net: {
     port: 47630,
     serviceType: 'conquest',
-    protocolVersion: 1,
+    protocolVersion: 2,
     pingIntervalMs: 5000,
     // Нет данных дольше этого — соединение считается потерянным.
     timeoutMs: 15000,

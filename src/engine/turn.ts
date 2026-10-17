@@ -5,6 +5,7 @@ import { resolveMovement } from './movement';
 import { Rng } from './rng';
 import type { GameState, Move, OrdersByPlayer, PlayerId, PlayerOrders, TurnEvent } from './types';
 import { applyEliminations, checkVictory } from './victory';
+import { declareWar } from './war';
 
 export function cloneState(s: GameState): GameState {
   return {
@@ -15,16 +16,17 @@ export function cloneState(s: GameState): GameState {
     flag: { ...s.flag },
     log: s.log.slice(),
     history: s.history.map((h) => h.slice()),
+    wars: s.wars?.slice(),
   };
 }
 
 export function emptyOrders(state: GameState, playerId: PlayerId): PlayerOrders {
-  return { tax: state.players[playerId]?.tax ?? 0, actions: [], moves: [] };
+  return { tax: state.players[playerId]?.tax ?? 0, actions: [], moves: [], wars: [] };
 }
 
 /**
  * Расчёт хода. orders — приказы всех игроков, включая ИИ (их считает хост до вызова).
- * Порядок: экономика → действия в провинциях → движение и бои → рост → выбывание и победа.
+ * Порядок: экономика → объявления войны → действия в провинциях → перемещения и бои → рост → выбывание и победа.
  * Функция чистая: исходное состояние не меняется, случайность — только из генератора партии.
  */
 export function resolveTurn(prev: GameState, orders: OrdersByPlayer): GameState {
@@ -42,6 +44,11 @@ export function resolveTurn(prev: GameState, orders: OrdersByPlayer): GameState 
   // 2. Экономика.
   applyEconomy(state, map, log);
 
+  // Объявления войны действуют уже в этом ходу: можно объявить и сразу атаковать.
+  for (const p of alive) {
+    for (const target of new Set(ordersOf(p.id).wars ?? [])) declareWar(state, map, p.id, target, prev, log);
+  }
+
   // 3. Действия в провинциях. ОД считаются по состоянию на начало хода.
   // Очерёдность игроков случайная, чтобы спор за одну нейтральную провинцию решался честно.
   const budgets = new Map(alive.map((p) => [p.id, newBudget(prev, map, p.id)]));
@@ -51,10 +58,11 @@ export function resolveTurn(prev: GameState, orders: OrdersByPlayer): GameState 
     }
   }
 
-  // 4–5. Движение и бои.
+  // 4–5. Перемещения (на оставшиеся ОД) и бои.
   const moves = new Map<PlayerId, Move[]>();
   for (const p of alive) moves.set(p.id, ordersOf(p.id).moves ?? []);
-  resolveMovement(state, map, moves, rng, log);
+  const apLeft = new Map(alive.map((p) => [p.id, budgets.get(p.id)!.ap]));
+  resolveMovement(state, map, moves, rng, log, apLeft);
 
   // 6. Рост населения и счастье.
   applyGrowth(state, map);

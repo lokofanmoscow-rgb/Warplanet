@@ -10,3 +10,4 @@ export * from './victory';
 export * from './setup';
 export * from './turn';
 export * from './plan';
+export * from './war';

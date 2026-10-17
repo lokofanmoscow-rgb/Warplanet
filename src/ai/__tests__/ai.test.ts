@@ -42,9 +42,9 @@ describe('ИИ-соперники', () => {
     const s = aiGame(6, 3);
     for (const p of s.players) {
       const orders = planOrders(s, p.id, 'medium');
-      const out = orders.moves.filter((m) => m.from === p.capital).reduce((sum, m) => sum + m.count, 0);
+      // В прогнозе ушедшие армии уже вышли из клетки.
       const plan = simulatePlan(s, p.id, orders);
-      expect(plan.projected.cells[p.capital!].troops - out).toBeGreaterThanOrEqual(5);
+      expect(plan.projected.cells[p.capital!].troops).toBeGreaterThanOrEqual(5);
     }
   });
 

@@ -35,7 +35,8 @@ describe('контроллер партии', () => {
     const to = map.cells[cap].neighbors.find((n) => map.cells[n].kind === 'land')!;
     expect(c.addMove({ from: cap, to, count: 10 })).toBeNull();
     expect(c.addMove({ from: cap, to: cap, count: 1 })).not.toBeNull();
-    expect(c.plan().apLeft).toBe(c.plan().apTotal - 1);
+    // найм 1 ОД + перемещение 0,5 ОД
+    expect(c.plan().apLeft).toBe(c.plan().apTotal - 1.5);
     c.undo();
     expect(c.orders().moves).toHaveLength(0);
     c.setTax(90);
