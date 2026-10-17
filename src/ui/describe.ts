@@ -37,7 +37,13 @@ export interface LogLine {
 }
 
 /** Короткий журнал хода: бои, захваты, доход — с точки зрения игрока viewer. */
-export function describeLog(game: GameState, map: MapDef, viewer: PlayerId | null): LogLine[] {
+export function describeLog(
+  game: GameState,
+  map: MapDef,
+  viewer: PlayerId | null,
+  /** Туман войны: чужие бои вне этих клеток в журнал не попадают. */
+  visible: ReadonlySet<number> | null = null,
+): LogLine[] {
   const name = (id: PlayerId | null) => (id === null ? 'ополчение' : game.players[id]?.name ?? '?');
   const cell = (id: number) => map.cells[id]?.name ?? '?';
   const lines: LogLine[] = [];
@@ -80,6 +86,7 @@ export function describeLog(game: GameState, map: MapDef, viewer: PlayerId | nul
         });
         break;
       case 'battle': {
+        if (visible && !mine(e.attacker) && !mine(e.defender) && !visible.has(e.cell)) break;
         const where = e.border ? `Встречный бой — ${cell(e.from!)} / ${cell(e.cell)}` : `Бой — ${cell(e.cell)}`;
         const won = e.winner !== null ? `победа: ${name(e.winner)}` : 'обе армии разбиты';
         const involved = mine(e.attacker) || mine(e.defender);
@@ -90,6 +97,15 @@ export function describeLog(game: GameState, map: MapDef, viewer: PlayerId | nul
         });
         break;
       }
+      case 'revolt':
+        lines.push({
+          text: e.suppressed
+            ? `Восстание подавлено — ${cell(e.cell)}: повстанцев ${e.rebels}, гарнизон ${e.garrison} → ${e.left}`
+            : `Восстание — ${cell(e.cell)}: ${name(e.player)} теряет провинцию, у повстанцев ${e.left}`,
+          player: e.player,
+          kind: mine(e.player) ? (e.suppressed ? 'info' : 'bad') : 'info',
+        });
+        break;
       case 'capture':
         lines.push({
           text: `Захват — ${cell(e.cell)}: ${name(e.player)}${e.from !== null ? ` (прежде: ${name(e.from)})` : ''}`,
@@ -113,6 +129,38 @@ export function describeLog(game: GameState, map: MapDef, viewer: PlayerId | nul
     }
   }
   return lines;
+}
+
+export interface NewsItem {
+  text: string;
+  bad: boolean;
+}
+
+/**
+ * Важное для игроков этого устройства в начале хода: кто объявил им войну и где были восстания.
+ * Если игроков на устройстве двое, пишем по именам.
+ */
+export function newsFor(game: GameState, map: MapDef, viewers: PlayerId[]): { war: boolean; items: NewsItem[] } {
+  const name = (id: PlayerId) => game.players[id]?.name ?? '?';
+  const one = viewers.length === 1;
+  const items: NewsItem[] = [];
+  let war = false;
+  for (const e of game.log) {
+    if (e.t === 'war' && viewers.includes(e.target)) {
+      war = true;
+      items.push({ text: one ? `«${name(e.player)}» объявляет вам войну!` : `«${name(e.player)}» объявляет войну стране «${name(e.target)}»`, bad: true });
+    }
+    if (e.t === 'revolt' && viewers.includes(e.player)) {
+      const where = map.cells[e.cell]?.name ?? '?';
+      const whose = one ? '' : ` (${name(e.player)})`;
+      items.push(
+        e.suppressed
+          ? { text: `Восстание в провинции ${where}${whose} подавлено: гарнизон ${e.garrison} → ${e.left}.`, bad: false }
+          : { text: `Восстание в провинции ${where}${whose}: она стала ничейной, там ${e.left} повстанцев. Поднимите счастье или держите там армию.`, bad: true },
+      );
+    }
+  }
+  return { war, items };
 }
 
 export function difficultyLabel(d: keyof typeof CONFIG.ai.difficulties): string {

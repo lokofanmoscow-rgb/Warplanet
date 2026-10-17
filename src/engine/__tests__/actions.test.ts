@@ -133,10 +133,10 @@ describe('очки действия и действия в провинциях'
     const plan = simulatePlan(
       s,
       0,
-      orders({ tax: 100, actions: [{ type: 'recruit', cell: 0, count: 10 }], moves: [{ from: 0, to: 1, count: 10 }] }),
+      orders({ tax: 90, actions: [{ type: 'recruit', cell: 0, count: 9 }], moves: [{ from: 0, to: 1, count: 9 }] }),
     );
-    // доход 20 золота → найм 10 солдат за 20
-    expect(plan.economy.income).toBe(20);
+    // доход 18 золота → найм 9 солдат за 18
+    expect(plan.economy.income).toBe(18);
     expect(plan.actionErrors).toEqual([null]);
     expect(plan.moveErrors).toEqual([null]);
     expect(plan.goldLeft).toBe(0);
@@ -157,7 +157,7 @@ describe('очки действия и действия в провинциях'
         { from: 0, to: 1, count: 50 },
       ],
     });
-    expect(clean.tax).toBe(200);
+    expect(clean.tax).toBe(90);
     expect(clean.actions).toEqual([]);
     expect(clean.moves).toEqual([{ from: 0, to: 1, count: 5 }]);
   });

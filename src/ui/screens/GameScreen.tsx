@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CONFIG, getMap, isPeaceful, moveBlockReason, reachable, type CellId, type MoveKind } from '../../engine';
+import { CONFIG, getMap, isPeaceful, moveBlockReason, reachable, visibleCells, type CellId, type MoveKind } from '../../engine';
 import type { MatchController } from '../../game/controller';
 import { clearSave } from '../../game/storage';
 import { Button, Panel, RoundButton, T } from '../components';
-import { GameMenu, HandoffScreen, LogDialog, MoveDialog, TaxDialog } from '../game/Dialogs';
+import { newsFor, type NewsItem } from '../describe';
+import { GameMenu, HandoffScreen, LogDialog, MoveDialog, NewsDialog, TaxDialog } from '../game/Dialogs';
 import { ProvincePanel } from '../game/ProvincePanel';
 import { TopBar } from '../game/TopBar';
 import { Icon } from '../icons';
@@ -55,18 +56,31 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   const [focus, setFocus] = useState<CellId | null>(me?.capital ?? null);
   const [now, setNow] = useState(Date.now());
 
-  // Новый ход — снимаем выделение, показываем бои с участием игрока, затем журнал.
+  // Новый ход — снимаем выделение; сначала новости (объявления войны, восстания), затем бои
+  // с участием игрока, затем журнал.
   const [replay, setReplay] = useState<{ list: BattleView[]; index: number; result: boolean } | null>(null);
+  const [news, setNews] = useState<{ war: boolean; items: NewsItem[]; battles: BattleView[] } | null>(null);
+  const showBattles = useCallback((list: BattleView[]) => {
+    if (list.length > 0) setReplay({ list, index: 0, result: false });
+    else setLogOpen(true);
+  }, []);
   useEffect(() => {
     setSelected(null);
     setChooser(null);
     setMoveFrom(null);
     setMoveDialog(null);
     if (!c.log || game.turn <= 1) return;
-    const list = battlesFor(c.log, game, map, c.localPlayers());
-    if (list.length > 0) setReplay({ list, index: 0, result: false });
-    else setLogOpen(true);
+    const viewers = c.localPlayers();
+    const list = battlesFor(c.log, game, map, viewers);
+    const n = newsFor(game, map, viewers);
+    if (n.items.length > 0) setNews({ ...n, battles: list });
+    else showBattles(list);
   }, [game.turn, game.finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  const closeNews = useCallback(() => {
+    const list = news?.battles ?? [];
+    setNews(null);
+    showBattles(list);
+  }, [news, showBattles]);
 
   const battle = replay ? replay.list[replay.index] : null;
   const clock = useBattleClock(replay ? `${game.turn}:${replay.index}` : null);
@@ -115,7 +129,8 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (replay) endReplay();
+      if (news) closeNews();
+      else if (replay) endReplay();
       else if (chooser) setChooser(null);
       else if (moveDialog || taxOpen || logOpen) {
         setMoveDialog(null);
@@ -126,10 +141,10 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
       return true;
     });
     return () => sub.remove();
-  }, [moveDialog, taxOpen, logOpen, selected, replay, endReplay, chooser]);
+  }, [moveDialog, taxOpen, logOpen, selected, replay, endReplay, chooser, news, closeNews]);
 
   // Конец партии — итоги.
-  const finishedSeen = game.finished && !logOpen && !replay;
+  const finishedSeen = game.finished && !logOpen && !replay && !news;
   useEffect(() => {
     if (!finishedSeen) return;
     void clearSave();
@@ -141,10 +156,14 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     return () => clearTimeout(t);
   }, [finishedSeen]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Туман войны: чужие армии видно только рядом со своей землёй и армиями.
+  const visible = useMemo(() => (hidden ? null : visibleCells(game, map, player)), [game, map, player, hidden]);
   const units = useMemo(() => {
-    const list = hidden ? buildUnits(game, null, null, null) : buildUnits(game, player, plan, orders);
+    // Пока телефон передают другому игроку, армий не видно вовсе.
+    if (hidden) return [];
+    const list = buildUnits(game, player, plan, orders, visible);
     return walk ? withoutWalker(list, walk) : list;
-  }, [game, player, plan, orders, hidden, walk, c.version]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [game, player, plan, orders, hidden, walk, visible, c.version]); // eslint-disable-line react-hooks/exhaustive-deps
   const draggable = useMemo(
     () => (editable ? plan.available.map((n, i) => (n > 0 ? i : -1)).filter((i) => i >= 0) : []),
     [editable, plan],
@@ -272,6 +291,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
         plan={plan}
         cell={selected}
         player={player}
+        visible={visible?.has(selected) ?? true}
         onClose={() => setSelected(null)}
         onError={setToast}
       />
@@ -285,6 +305,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
         units={units}
         walk={hidden ? null : walk}
         hiddenUnits={hiddenUnits}
+        visible={visible}
         overlay={
           replay && battle
             ? ({ geo, k, font, atlas }) => (
@@ -444,8 +465,17 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
           }}
         />
       )}
-      {logOpen && <LogDialog game={game} map={map} viewer={c.mode === 'hotseat' ? null : player} onClose={() => setLogOpen(false)} />}
-      {c.handoff !== null && !logOpen && !replay && !game.finished && <HandoffScreen game={game} player={c.handoff} onReady={() => c.takeOver()} />}
+      {logOpen && (
+        <LogDialog
+          game={game}
+          map={map}
+          viewer={c.mode === 'hotseat' ? null : player}
+          visible={c.mode === 'hotseat' ? null : visibleCells(game, map, player)}
+          onClose={() => setLogOpen(false)}
+        />
+      )}
+      {news && <NewsDialog war={news.war} items={news.items} onClose={closeNews} />}
+      {c.handoff !== null && !logOpen && !replay && !news && !game.finished && <HandoffScreen game={game} player={c.handoff} onReady={() => c.takeOver()} />}
       {menuOpen && (
         <GameMenu
           canSave={c.mode !== 'client'}

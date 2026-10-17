@@ -1,8 +1,10 @@
 import { applyAction, festivalCost, newBudget } from '../actions';
+import { happinessTarget, nextHappiness } from '../economy';
 import { reachable } from '../movement';
 import { sanitizeOrders, simulatePlan } from '../plan';
 import { resolveTurn } from '../turn';
 import type { TurnEvent } from '../types';
+import { visibleCells } from '../vision';
 import { atWar } from '../war';
 import { blankState, makeMap, own, orders, ordersFor } from './helpers';
 
@@ -160,8 +162,8 @@ describe('объявление войны', () => {
     expect(atWar(next, 1, 0)).toBe(true);
     expect(next.log).toContainEqual({ t: 'war', player: 0, target: 1 });
     expect(next.cells[1].owner).toBe(0);
-    // Тот, на кого напали, счастья не теряет: 70 → 75 к цели налога, как обычно.
-    expect(next.cells[7].happiness).toBe(75);
+    // Тот, на кого напали, счастья не теряет: оно идёт к цели налога, как обычно.
+    expect(next.cells[7].happiness).toBe(Math.round(nextHappiness(70, happinessTarget(60))));
     // Захваченная: 40%, затем шаг к цели налога.
     expect(next.cells[1].happiness).toBe(45);
   });
@@ -200,5 +202,18 @@ describe('праздник', () => {
     s.cells[1].owner = 0;
     s.cells[1].happiness = 100;
     expect(applyAction(s, map, 0, { type: 'festival', cell: 1 }, b)).toMatch(/100%/);
+  });
+});
+
+describe('видимость', () => {
+  test('армии видно в 2 клетках от своей земли и своего флота', () => {
+    const s = blankState(map);
+    own(s, 0, 0, 5);
+    own(s, 12, 0, 3); // флот в море 12
+    const v = visibleCells(s, map, 0);
+    expect([0, 1, 2, 8, 9].every((c) => v.has(c))).toBe(true);
+    expect(v.has(3)).toBe(false);
+    expect([10, 11, 12, 13, 14].every((c) => v.has(c))).toBe(true);
+    expect(v.has(15)).toBe(false);
   });
 });

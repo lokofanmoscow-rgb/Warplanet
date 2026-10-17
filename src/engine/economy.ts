@@ -9,9 +9,15 @@ export function clampTax(tax: number): number {
   return Math.min(E.taxMax, Math.max(E.taxMin, stepped));
 }
 
-/** Цель счастья при налоге: 100 − 0,4 × налог. */
+/** Цель счастья при налоге: чем выше налог, тем круче падает. */
 export function happinessTarget(tax: number): number {
-  return E.happinessBase - E.happinessPerTax * tax;
+  return Math.max(0, E.happinessBase - E.happinessPerTax * tax - E.happinessPerTax2 * tax * tax);
+}
+
+/** Счастье за ход: растёт на шаг, падает быстрее — на долю разрыва до цели. */
+export function nextHappiness(value: number, target: number): number {
+  if (target >= value) return stepToward(value, target, E.happinessStep);
+  return stepToward(value, target, Math.max(E.happinessStep, (value - target) * E.happinessFallShare));
 }
 
 /** Множитель дохода от счастья. */
@@ -108,7 +114,7 @@ export function applyGrowth(state: GameState, map: MapDef): void {
       cell.pop = Math.round(cell.pop * (1 - E.decline));
     }
     const target = happinessTarget(state.players[cell.owner].tax);
-    cell.happiness = stepToward(cell.happiness, target, E.happinessStep);
+    cell.happiness = Math.round(nextHappiness(cell.happiness, target));
   });
 }
 

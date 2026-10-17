@@ -23,7 +23,7 @@ describe.each(MAPS.map((m) => [m.id, m] as const))('карта %s', (_, map) => 
     const land = map.cells.filter((c) => c.kind === 'land');
     const sea = map.cells.filter((c) => c.kind === 'sea');
     expect(land.length).toBeGreaterThanOrEqual(50);
-    expect(land.length).toBeLessThanOrEqual(80);
+    expect(land.length).toBeLessThanOrEqual(100);
     expect(sea.length).toBeGreaterThanOrEqual(15);
     for (const c of land) {
       expect(c.pop).toBeGreaterThanOrEqual(5000);

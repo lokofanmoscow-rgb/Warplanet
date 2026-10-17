@@ -92,14 +92,14 @@ describe('контроллер партии', () => {
     expect(hc.active).toBe(0);
     expect(cc.active).toBe(1);
 
-    cc.setTax(100);
+    cc.setTax(80);
     cc.ready();
     await waitFor(() => hc.readyFlags()[1] === true);
     expect(hc.isSubmitted()).toBe(false);
     hc.ready();
     await waitFor(() => hc.game.turn === 2 && cc.game.turn === 2);
     expect(cc.game).toEqual(hc.game);
-    expect(cc.game.players[1].tax).toBe(100);
+    expect(cc.game.players[1].tax).toBe(80);
     expect(cc.canEdit()).toBe(true);
     expect(cc.log).not.toBeNull();
 

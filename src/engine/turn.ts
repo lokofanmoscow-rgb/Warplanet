@@ -2,6 +2,7 @@ import { applyAction, newBudget } from './actions';
 import { applyEconomy, applyGrowth, clampTax } from './economy';
 import { getMap } from './map';
 import { resolveMovement } from './movement';
+import { applyRevolts } from './revolt';
 import { Rng } from './rng';
 import type { GameState, Move, OrdersByPlayer, PlayerId, PlayerOrders, TurnEvent } from './types';
 import { applyEliminations, checkVictory } from './victory';
@@ -26,7 +27,7 @@ export function emptyOrders(state: GameState, playerId: PlayerId): PlayerOrders 
 
 /**
  * Расчёт хода. orders — приказы всех игроков, включая ИИ (их считает хост до вызова).
- * Порядок: экономика → объявления войны → действия в провинциях → перемещения и бои → рост → выбывание и победа.
+ * Порядок: экономика → объявления войны → действия → перемещения и бои → рост и счастье → восстания → выбывание и победа.
  * Функция чистая: исходное состояние не меняется, случайность — только из генератора партии.
  */
 export function resolveTurn(prev: GameState, orders: OrdersByPlayer): GameState {
@@ -64,8 +65,9 @@ export function resolveTurn(prev: GameState, orders: OrdersByPlayer): GameState 
   const apLeft = new Map(alive.map((p) => [p.id, budgets.get(p.id)!.ap]));
   resolveMovement(state, map, moves, rng, log, apLeft);
 
-  // 6. Рост населения и счастье.
+  // 6. Рост населения и счастье, затем восстания в несчастных провинциях.
   applyGrowth(state, map);
+  applyRevolts(state, map, rng, log);
 
   // 7. Выбывание и победа.
   applyEliminations(state, log);

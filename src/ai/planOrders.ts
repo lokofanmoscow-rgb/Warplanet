@@ -175,6 +175,12 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
     }
   }
 
+  // Праздник там, где счастье близко к восстанию.
+  const unhappy = myCells
+    .filter((id) => isLand(id) && cells[id].happiness < CONFIG.revolt.below + 5)
+    .sort((a, b) => cells[a].happiness - cells[b].happiness);
+  for (const id of unhappy) tryAction({ type: 'festival', cell: id });
+
   // 6. Покупка соседних нейтралов на оставшееся золото.
   const buyable = cells
     .map((_, i) => i)

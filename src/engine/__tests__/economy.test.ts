@@ -33,15 +33,16 @@ describe('экономика', () => {
     expect(incomeFactor(10)).toBe(0);
   });
 
-  test('цель счастья = 100 − 0,4 × налог', () => {
+  test('цель счастья круто падает с налогом', () => {
     expect(happinessTarget(0)).toBe(100);
-    expect(happinessTarget(100)).toBe(60);
-    expect(happinessTarget(200)).toBe(20);
+    expect(Math.round(happinessTarget(30))).toBe(81);
+    expect(Math.round(happinessTarget(60))).toBe(54);
+    expect(Math.round(happinessTarget(90))).toBe(19);
   });
 
-  test('налог 0–200% с шагом 10%', () => {
+  test('налог 0–90% с шагом 10%', () => {
     expect(clampTax(-5)).toBe(0);
-    expect(clampTax(250)).toBe(200);
+    expect(clampTax(250)).toBe(90);
     expect(clampTax(74)).toBe(70);
     expect(clampTax(75)).toBe(80);
   });
@@ -115,20 +116,20 @@ describe('экономика', () => {
     expect(s.cells[2].pop).toBe(20000);
   });
 
-  test('счастье за ход сдвигается на 5 пунктов к цели', () => {
+  test('счастье растёт на 5 за ход, а падает на треть разрыва', () => {
     const s = blankState(map);
     own(s, 0, 0);
     s.cells[0].happiness = 70;
-    s.players[0].tax = 200; // цель 20
+    s.players[0].tax = 90; // цель 19, разрыв 51 → −18
     applyGrowth(s, map);
-    expect(s.cells[0].happiness).toBe(65);
+    expect(s.cells[0].happiness).toBe(52);
     s.players[0].tax = 0; // цель 100
     applyGrowth(s, map);
-    expect(s.cells[0].happiness).toBe(70);
+    expect(s.cells[0].happiness).toBe(57);
     s.cells[0].happiness = 58;
-    s.players[0].tax = 100; // цель 60, ближе 5 пунктов — встаёт ровно на цель
+    s.players[0].tax = 60; // цель 54, ближе шага — встаёт на цель
     applyGrowth(s, map);
-    expect(s.cells[0].happiness).toBe(60);
+    expect(s.cells[0].happiness).toBe(54);
   });
 
   test('налог из приказов действует уже в этом ходу', () => {
@@ -139,7 +140,8 @@ describe('экономика', () => {
     s.players[0].tax = 0;
     s.players[0].gold = 0;
     const next = resolveTurn(s, ordersFor(s, { 0: { tax: 200 } }));
-    expect(next.players[0].tax).toBe(200);
-    expect(next.players[0].gold).toBe(20);
+    // Больше 90% нельзя.
+    expect(next.players[0].tax).toBe(90);
+    expect(next.players[0].gold).toBe(9);
   });
 });

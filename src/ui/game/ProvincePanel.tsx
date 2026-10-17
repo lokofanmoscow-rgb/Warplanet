@@ -60,6 +60,7 @@ export function ProvincePanel({
   plan,
   cell,
   player,
+  visible,
   onClose,
   onError,
 }: {
@@ -69,6 +70,8 @@ export function ProvincePanel({
   plan: PlanResult;
   cell: CellId;
   player: PlayerId;
+  /** Видна ли армия в этой клетке (туман войны). */
+  visible: boolean;
   onClose: () => void;
   onError: (msg: string) => void;
 }) {
@@ -139,8 +142,10 @@ export function ProvincePanel({
         {mine ? <Line label="Доход" value={`+${income.toFixed(1)} за ход`} /> : null}
         <Line
           label={st.owner === null ? 'Ополчение' : 'Гарнизон'}
-          value={`${mine ? proj.troops : st.troops}${st.fortified ? ' · укреплена ×2' : ''}`}
-          hint={mine && plan.available[cell] !== proj.troops ? `ходят ${plan.available[cell]}` : undefined}
+          value={!mine && !visible ? '?' : `${mine ? proj.troops : st.troops}${st.fortified ? ' · укреплена ×2' : ''}`}
+          hint={
+            !mine && !visible ? 'далеко, не видно' : mine && plan.available[cell] !== proj.troops ? `ходят ${plan.available[cell]}` : undefined
+          }
         />
         {foreign && (
           <Line

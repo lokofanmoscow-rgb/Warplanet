@@ -52,21 +52,68 @@ async function ms(commands, input = {}) {
 const q = (s) => JSON.stringify(s);
 const wl = q(cfg.countries);
 const mergeExpr = `adm0_a3 = (${q(cfg.merge)})[adm0_a3] || adm0_a3`;
-const [bx0, by0, bx1, by1] = cfg.bbox;
 
 // ---------- 1. Играбельные регионы (долгота/широта) ----------
 
 log('1. Регионы…');
-const { play } = await ms(
-  `-i ${shp('ne_10m_admin_1_states_provinces')} name=play ` +
-    `-each ${q(mergeExpr)} ` +
-    `-filter ${q(`${wl}.indexOf(adm0_a3) > -1`)} ` +
-    `-clip bbox=${cfg.bbox.join(',')} ` +
-    `-filter-islands min-area=${cfg.minIslandKm2}km2 remove-empty ` +
-    `-filter-fields adm0_a3,name,name_ru ` +
-    `-o format=geojson precision=0.000001 play.json`,
-);
-const regions = play.features.filter((f) => f.geometry && geometryArea(f.geometry) > 0);
+// Регионы стран из списка, обрезанные рамкой clip (bbox=… или файлом с контуром).
+async function loadPlay(list, clip, files = {}) {
+  const { play } = await ms(
+    `-i ${shp('ne_10m_admin_1_states_provinces')} name=play ` +
+      `-each ${q(mergeExpr)} ` +
+      `-filter ${q(`${q(list)}.indexOf(adm0_a3) > -1`)} ` +
+      `-clip ${clip} ` +
+      `-filter-islands min-area=${cfg.minIslandKm2}km2 remove-empty ` +
+      `-filter-fields adm0_a3,name,name_ru ` +
+      `-o format=geojson precision=0.000001 play.json`,
+    files,
+  );
+  return play.features.filter((f) => f.geometry && geometryArea(f.geometry) > 0);
+}
+
+// Сначала регионы в прямоугольнике долгот и широт bbox — по ним считаются проекция и размер карты.
+// Затем играбельной становится вся суша этих стран внутри прямоугольника карты: без косого
+// среза по меридиану и серой «ничейной» земли у края.
+const preRegions = await loadPlay(cfg.frameCountries ?? cfg.countries, `bbox=${cfg.bbox.join(',')}`);
+
+const projection = geoConicConformal()
+  .parallels(cfg.projection.parallels)
+  .rotate(cfg.projection.rotate)
+  .scale(1000)
+  .translate([0, 0]);
+{
+  // Рамка = границы суши в bbox + поля.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of preRegions) for (const ring of rings(r.geometry)) for (const p of ring) {
+    const [x, y] = projection(p);
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+  }
+  const k = cfg.width / (x1 - x0);
+  projection.scale(1000 * k).translate([-x0 * k, -y0 * k]);
+  const kmPerUnit = kmBetween(projection.invert([cfg.width / 2, (y1 - y0) * k / 2]), projection.invert([cfg.width / 2 + 100, (y1 - y0) * k / 2])) / 100;
+  const m = cfg.marginKm / kmPerUnit;
+  const k2 = cfg.width / (cfg.width + 2 * m);
+  projection.scale(1000 * k * k2).translate([(-x0 * k + m) * k2, (-y0 * k + m) * k2]);
+  cfg.height = Math.ceil(((y1 - y0) * k + 2 * m) * k2);
+}
+const W = cfg.width;
+const H = cfg.height;
+log(`   размер карты: ${W}×${H}`);
+const inFrame = (lonlat) => {
+  const [x, y] = projection(lonlat);
+  return x >= 0 && x <= W && y >= 0 && y <= H;
+};
+
+const frameLonLat = [];
+const STEPS = 64;
+for (let i = 0; i <= STEPS; i++) frameLonLat.push(projection.invert([(W * i) / STEPS, 0]));
+for (let i = 1; i <= STEPS; i++) frameLonLat.push(projection.invert([W, (H * i) / STEPS]));
+for (let i = 1; i <= STEPS; i++) frameLonLat.push(projection.invert([W - (W * i) / STEPS, H]));
+for (let i = 1; i <= STEPS; i++) frameLonLat.push(projection.invert([0, H - (H * i) / STEPS]));
+const frame = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [frameLonLat.reverse()] } }] };
+
+for (const [t, xy] of [['СЗ', [0, 0]], ['С', [W / 2, 0]], ['СВ', [W, 0]], ['З', [0, H / 2]], ['В', [W, H / 2]], ['ЮЗ', [0, H]], ['Ю', [W / 2, H]], ['ЮВ', [W, H]]]) log(`   угол ${t}: ${projection.invert(xy).map((v) => v.toFixed(1)).join(', ')}`);
+const regions = await loadPlay(cfg.countries, 'frame.json', { 'frame.json': frame });
 log(`   регионов: ${regions.length}`);
 
 // Площадь в км² (геодезически приблизительно).
@@ -119,7 +166,6 @@ const allPlaces = places.features.map((f) => ({
   ADM0_A3: cfg.merge[f.properties.ADM0_A3] ?? f.properties.ADM0_A3,
   at: f.geometry.coordinates,
 }));
-const inBox = (p) => p[0] >= bx0 && p[0] <= bx1 && p[1] >= by0 && p[1] <= by1;
 
 const country = {};
 for (const code of [...cfg.countries, ...separateCodes]) {
@@ -136,7 +182,7 @@ for (const code of [...cfg.countries, ...separateCodes]) {
     .reduce((s, c) => s + Math.max(0, c.POP_EST), 0);
   const pl = allPlaces.filter((p) => p.ADM0_A3 === code);
   const cityAll = pl.reduce((s, p) => s + p.POP_MAX, 0);
-  const cityIn = pl.filter((p) => inBox(p.at)).reduce((s, p) => s + p.POP_MAX, 0);
+  const cityIn = pl.filter((p) => inFrame(p.at)).reduce((s, p) => s + p.POP_MAX, 0);
   country[code] = { code, regions: regs, area, pop: popEst * (cityAll > 0 ? cityIn / cityAll : 1) };
 }
 
@@ -277,60 +323,19 @@ for (const c of Object.values(country)) {
 }
 log(`   групп: ${provCount}`);
 
-// ---------- Проекция и рамка ----------
-
-const projection = geoConicConformal()
-  .parallels(cfg.projection.parallels)
-  .rotate(cfg.projection.rotate)
-  .scale(1000)
-  .translate([0, 0]);
-const bboxOutline = {
-  type: 'Polygon',
-  // По часовой стрелке: в d3-geo это сам прямоугольник, а не весь мир без него.
-  coordinates: [[[bx0, by0], [bx0, by1], [bx1, by1], [bx1, by0], [bx0, by0]]],
-};
-{
-  // Рамка = границы играбельной суши + поля.
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const r of regions) for (const ring of rings(r.geometry)) for (const p of ring) {
-    const [x, y] = projection(p);
-    x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
-  }
-  const k = cfg.width / (x1 - x0);
-  projection.scale(1000 * k).translate([-x0 * k, -y0 * k]);
-  const kmPerUnit = kmBetween(projection.invert([cfg.width / 2, (y1 - y0) * k / 2]), projection.invert([cfg.width / 2 + 100, (y1 - y0) * k / 2])) / 100;
-  const m = cfg.marginKm / kmPerUnit;
-  const k2 = cfg.width / (cfg.width + 2 * m);
-  projection.scale(1000 * k * k2).translate([(-x0 * k + m) * k2, (-y0 * k + m) * k2]);
-  cfg.height = Math.ceil(((y1 - y0) * k + 2 * m) * k2);
-}
-const W = cfg.width;
-const H = cfg.height;
-log(`   размер карты: ${W}×${H}`);
-
-const frameLonLat = [];
-const STEPS = 64;
-for (let i = 0; i <= STEPS; i++) frameLonLat.push(projection.invert([(W * i) / STEPS, 0]));
-for (let i = 1; i <= STEPS; i++) frameLonLat.push(projection.invert([W, (H * i) / STEPS]));
-for (let i = 1; i <= STEPS; i++) frameLonLat.push(projection.invert([W - (W * i) / STEPS, H]));
-for (let i = 1; i <= STEPS; i++) frameLonLat.push(projection.invert([0, H - (H * i) / STEPS]));
-const frame = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [frameLonLat.reverse()] } }] };
-
 // ---------- Фон: суша вне игры ----------
 
 log('   фоновая суша…');
-const bbox = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: bboxOutline }] };
+// Страны не из списка; убранные (dropBackground) — просто море.
+const hidden = q([...cfg.countries, ...(cfg.dropBackground ?? [])]);
 const { bg } = await ms(
-  `-i ${shp('ne_10m_admin_1_states_provinces')} name=all ` +
+  `-i ${shp('ne_10m_admin_1_states_provinces')} name=bg ` +
     `-each ${q(mergeExpr)} ` +
+    `-filter ${q(`${hidden}.indexOf(adm0_a3) == -1`)} ` +
     `-clip frame.json ` +
     `-filter-islands min-area=${cfg.minIslandKm2}km2 remove-empty ` +
-    `-filter ${q(`${wl}.indexOf(adm0_a3) == -1`)} + name=bg1 ` +
-    `-filter target=all ${q(`${wl}.indexOf(adm0_a3) > -1`)} + name=bg2 ` +
-    `-erase target=bg2 bbox.json ` +
-    `-merge-layers target=bg1,bg2 name=bg force ` +
-    `-o target=bg format=geojson precision=0.000001 bg.json`,
-  { 'frame.json': frame, 'bbox.json': bbox },
+    `-o format=geojson precision=0.000001 bg.json`,
+  { 'frame.json': frame },
 );
 
 // ---------- Перевод в плоские координаты ----------
@@ -350,21 +355,27 @@ const planarRegions = {
 };
 const planarBg = {
   type: 'FeatureCollection',
-  features: bg.features.filter((f) => f.geometry).map((f) => ({ type: 'Feature', properties: { bg: 1 }, geometry: projGeom(f.geometry) })),
+  features: (bg?.features ?? []).filter((f) => f.geometry).map((f) => ({ type: 'Feature', properties: { bg: 1 }, geometry: projGeom(f.geometry) })),
 };
+log(`   фоновых регионов: ${planarBg.features.length}`);
 
 // ---------- 3. Морские зоны ----------
 
 log('3. Морские зоны…');
+// Затравка может стоять чуть за краем карты — её зона всё равно заходит на карту. Далёкие не нужны.
+const nearFrame = (lonlat) => {
+  const [x, y] = projection(lonlat);
+  return x >= -0.2 * W && x <= 1.2 * W && y >= -0.2 * H && y <= 1.2 * H;
+};
+for (const s of cfg.seas) if (!nearFrame(s.at)) log(`   ! ${s.name}: далеко за краем карты, пропускаю`);
+cfg.seas = cfg.seas.filter((s) => nearFrame(s.at));
 const seeds = cfg.seas.map((s) => projection(s.at));
 const voronoi = Delaunay.from(seeds).voronoi([0, 0, W, H]);
 const cells = {
   type: 'FeatureCollection',
-  features: seeds.map((_, i) => ({
-    type: 'Feature',
-    properties: { zone: i },
-    geometry: { type: 'Polygon', coordinates: [voronoi.cellPolygon(i)] },
-  })),
+  features: seeds
+    .map((_, i) => ({ type: 'Feature', properties: { zone: i }, geometry: { type: 'Polygon', coordinates: [voronoi.cellPolygon(i)] } }))
+    .filter((f) => f.geometry.coordinates[0]),
 };
 const stage = await ms(
   `-i regions.json bg.json cells.json combine-files ` +
@@ -454,7 +465,7 @@ const seaIndex = (name) => {
 for (const [a, b] of cfg.seaLinks) linkCells(seaIndex(a), seaIndex(b), `${a} — ${b}`);
 
 // Население: доля страны по площади и по городам пополам.
-const placesPlanar = allPlaces.filter((p) => inBox(p.at)).map((p) => ({ ...p, xy: projection(p.at) }));
+const placesPlanar = allPlaces.filter((p) => inFrame(p.at)).map((p) => ({ ...p, xy: projection(p.at) }));
 const landCells = all.filter((c) => c.kind === 'land');
 for (const c of landCells) {
   c.places = [];

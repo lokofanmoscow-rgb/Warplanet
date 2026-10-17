@@ -11,3 +11,5 @@ export * from './setup';
 export * from './turn';
 export * from './plan';
 export * from './war';
+export * from './revolt';
+export * from './vision';

@@ -1,4 +1,4 @@
-import { createGame, ownedLandCount, resolveTurn, simulatePlan, type GameState } from '../../engine';
+import { CONFIG, createGame, happinessTarget, ownedLandCount, resolveTurn, simulatePlan, type GameState } from '../../engine';
 import { getMap, DEFAULT_MAP_ID } from '../../maps';
 import { aiTax, planAllAI, planOrders } from '../planOrders';
 
@@ -12,10 +12,10 @@ function aiGame(count: number, seed: number, difficulty: 'easy' | 'medium' | 'ha
 }
 
 describe('ИИ-соперники', () => {
-  test('налог держит счастье не ниже 55%', () => {
+  test('налог — самый высокий, при котором счастье не ниже порога ИИ', () => {
     const t = aiTax();
-    expect(100 - 0.4 * t).toBeGreaterThanOrEqual(55);
-    expect(100 - 0.4 * (t + 10)).toBeLessThan(55);
+    expect(happinessTarget(t)).toBeGreaterThanOrEqual(CONFIG.ai.minHappiness);
+    expect(happinessTarget(t + 10)).toBeLessThan(CONFIG.ai.minHappiness);
   });
 
   test('приказы ИИ проходят проверку движка', () => {

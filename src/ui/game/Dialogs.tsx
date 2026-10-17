@@ -13,7 +13,8 @@ import {
   type PlayerId,
 } from '../../engine';
 import { Button, Panel, Row, Stepper, Swatch, T, Title } from '../components';
-import { describeLog, fmtAp, plural } from '../describe';
+import { describeLog, fmtAp, plural, type NewsItem } from '../describe';
+import { Icon } from '../icons';
 import { COLORS, useLayout } from '../theme';
 
 export function Overlay({ children, onDismiss, maxWidth = 460 }: { children: React.ReactNode; onDismiss?: () => void; maxWidth?: number }) {
@@ -113,7 +114,7 @@ export function MoveDialog({
   );
 }
 
-/** Налог — одна ставка на всю страну, 0–200% с шагом 10%. */
+/** Налог — одна ставка на всю страну, 0–90% с шагом 10%. */
 export function TaxDialog({
   game,
   player,
@@ -138,7 +139,8 @@ export function TaxDialog({
     <Overlay onDismiss={onCancel}>
       <Title size={20}>Налог</Title>
       <T dim size={13} style={{ marginTop: 4 * s }}>
-        Высокий налог даёт больше золота, но снижает счастье. Счастье каждый ход сдвигается на {E.happinessStep} пунктов к цели.
+        Высокий налог даёт больше золота, но снижает счастье. Счастье растёт на {E.happinessStep} пунктов за ход, а падает быстрее.
+        Ниже {CONFIG.revolt.below}% возможны восстания: провинция может стать ничейной.
       </T>
       <View style={{ alignItems: 'center', marginVertical: 14 * s }}>
         <Stepper value={tax} min={E.taxMin} max={E.taxMax} step={E.taxStep} big={50} format={(v) => `${v}%`} onChange={editable ? setTax : () => {}} />
@@ -160,20 +162,43 @@ export function TaxDialog({
   );
 }
 
+/** Важное в начале хода: объявления войны и восстания. Закрывается кнопкой «ОК». */
+export function NewsDialog({ war, items, onClose }: { war: boolean; items: NewsItem[]; onClose: () => void }) {
+  const { s } = useLayout();
+  return (
+    <Overlay onDismiss={onClose} maxWidth={420}>
+      <View style={{ alignItems: 'center', gap: 6 * s }}>
+        {war ? <Icon name="swords" size={40 * s} color={COLORS.danger} /> : null}
+        <Title size={22}>{war ? 'Вам объявили войну!' : 'Новости'}</Title>
+      </View>
+      <View style={{ gap: 8 * s, marginVertical: 14 * s }}>
+        {items.map((it, i) => (
+          <T key={i} size={15} style={{ color: it.bad ? '#FFB4A6' : COLORS.text, textAlign: 'center' }}>
+            {it.text}
+          </T>
+        ))}
+      </View>
+      <Button label="ОК" variant="primary" onPress={onClose} />
+    </Overlay>
+  );
+}
+
 /** Короткий журнал хода: бои, захваты, доход. */
 export function LogDialog({
   game,
   map,
   viewer,
+  visible,
   onClose,
 }: {
   game: GameState;
   map: MapDef;
   viewer: PlayerId | null;
+  visible?: ReadonlySet<CellId> | null;
   onClose: () => void;
 }) {
   const { s } = useLayout();
-  const lines = describeLog(game, map, viewer);
+  const lines = describeLog(game, map, viewer, visible ?? null);
   const resolved = game.finished ? game.turn : game.turn - 1;
   return (
     <Overlay onDismiss={onClose} maxWidth={560}>

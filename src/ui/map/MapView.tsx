@@ -13,7 +13,18 @@ import { Easing, runOnJS, useDerivedValue, useSharedValue, withTiming } from 're
 import { isPeaceful, type CellId, type GameState, type MapDef, type PlanResult, type PlayerId, type PlayerOrders } from '../../engine';
 import { COLORS } from '../theme';
 import { cellAt, getGeometry, type MapGeometry } from './geometry';
-import { ArrowLayer, DragArrow, fortKey, ownershipKey, SeaLayer, SelectionLayer, useNoiseTile, StartPointsLayer, WaterRipple } from './layers';
+import {
+  ArrowLayer,
+  DragArrow,
+  FogLayer,
+  fortKey,
+  ownershipKey,
+  SeaLayer,
+  SelectionLayer,
+  useNoiseTile,
+  StartPointsLayer,
+  WaterRipple,
+} from './layers';
 import { useSpriteImages } from './sprites';
 import { BASE_RES, StaticMap, type DetailRequest } from './StaticMap';
 import {
@@ -56,6 +67,8 @@ export interface MapViewProps {
   walk?: WalkInfo | null;
   /** Клетки, где армии временно не показываются. */
   hiddenUnits?: ReadonlySet<CellId>;
+  /** Туман войны: что видит игрок; остальное затемнено. */
+  visible?: ReadonlySet<CellId> | null;
   /** Слой поверх армий (показ боя). */
   overlay?: (ctx: { geo: MapGeometry; k: number; font: SkFont | null; atlas: SkImage | null }) => React.ReactNode;
   selected?: CellId | null;
@@ -388,6 +401,7 @@ export function MapView(props: MapViewProps) {
                 detail={detail}
                 labelFont={labelFont}
               />
+              {props.visible ? <FogLayer geo={geo} visible={props.visible} /> : null}
               <SelectionLayer geo={geo} cell={props.selected ?? null} targets={props.targets ?? EMPTY} />
               {props.startPoints && <StartPointsLayer geo={geo} points={props.startPoints} font={plateFont} k={k} />}
               <AttackArrows map={map} game={game} units={props.units} k={k} hidden={props.hiddenUnits} />
@@ -422,7 +436,13 @@ function clampOffset(x: number, y: number, z: number, w: number, h: number, mapW
  * Армии по состоянию партии и плану игрока: свои — как в прогнозе (мирные перемещения уже на месте),
  * отряды, идущие в атаку, стоят на границе с целью.
  */
-export function buildUnits(game: GameState, viewer: PlayerId | null, plan: PlanResult | null, orders: PlayerOrders | null): UnitInfo[] {
+export function buildUnits(
+  game: GameState,
+  viewer: PlayerId | null,
+  plan: PlanResult | null,
+  orders: PlayerOrders | null,
+  visible: ReadonlySet<CellId> | null = null,
+): UnitInfo[] {
   const out: UnitInfo[] = [];
   const recruited = new Set((orders?.actions ?? []).filter((a) => a.type === 'recruit').map((a) => a.cell));
   game.cells.forEach((c, id) => {
@@ -430,6 +450,8 @@ export function buildUnits(game: GameState, viewer: PlayerId | null, plan: PlanR
     const mine = viewer !== null && !!proj && (c.owner === viewer || proj.owner === viewer);
     const p = mine ? proj! : c;
     if (p.troops <= 0) return;
+    // Чужие армии в тумане войны не видны.
+    if (!mine && visible && !visible.has(id)) return;
     out.push({ key: `c${id}`, cell: id, owner: p.owner, troops: p.troops, recruited: mine && recruited.has(id) });
   });
   if (plan && orders && viewer !== null) {

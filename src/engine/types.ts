@@ -163,6 +163,17 @@ export type TurnEvent =
   | { t: 'festival'; player: PlayerId; cell: CellId }
   | { t: 'war'; player: PlayerId; target: PlayerId }
   | {
+      t: 'revolt';
+      cell: CellId;
+      player: PlayerId;
+      rebels: number;
+      garrison: number;
+      /** Гарнизон выстоял. */
+      suppressed: boolean;
+      /** Сколько осталось у победителя (гарнизона или повстанцев). */
+      left: number;
+    }
+  | {
       t: 'battle';
       cell: CellId;
       /** Для боя на границе — откуда шёл атакующий. */

@@ -29,7 +29,7 @@ export const CONFIG = {
 
   economy: {
     taxMin: 0,
-    taxMax: 200,
+    taxMax: 90,
     taxStep: 10,
     // доход = население / popPerGold × налог / 100 × k
     popPerGold: 1000,
@@ -37,10 +37,14 @@ export const CONFIG = {
     fullAt: 50,
     partialAt: 25,
     partialK: 0.25,
-    // цель счастья = 100 − happinessPerTax × налог
+    // цель счастья = 100 − happinessPerTax × налог − happinessPerTax2 × налог²:
+    // 30% → 81, 50% → 64, 60% → 54, 90% → 19.
     happinessBase: 100,
-    happinessPerTax: 0.4,
+    happinessPerTax: 0.5,
+    happinessPerTax2: 0.0045,
+    // Растёт счастье на happinessStep за ход, а падает быстрее: на долю разрыва, не меньше шага.
     happinessStep: 5,
+    happinessFallShare: 0.35,
     // Рост населения.
     growthAt: 50,
     growth: 0.02,
@@ -83,6 +87,19 @@ export const CONFIG = {
     embarkGoldPerSoldier: 2,
   },
 
+  vision: {
+    // Чужие армии видно не дальше стольких клеток от своей земли и своих армий.
+    range: 2,
+  },
+
+  revolt: {
+    // Ниже этого счастья возможны восстания: шанс за ход = (порог − счастье) × chancePerPoint.
+    below: 40,
+    chancePerPoint: 0.015,
+    // Повстанцев: население / popPerRebel; гарнизон бьётся с ними (укрепление помогает).
+    popPerRebel: 700,
+  },
+
   war: {
     // Объявивший войну теряет столько счастья во всех своих провинциях; на кого напали — нет.
     happinessLoss: 10,
@@ -99,7 +116,7 @@ export const CONFIG = {
 
   ai: {
     // ИИ ставит налог, при котором счастье держится не ниже этого.
-    minHappiness: 55,
+    minHappiness: 52,
     // Минимальный гарнизон столицы.
     capitalMinGarrison: 5,
     difficulties: {
@@ -119,7 +136,7 @@ export const CONFIG = {
   net: {
     port: 47630,
     serviceType: 'conquest',
-    protocolVersion: 2,
+    protocolVersion: 3,
     pingIntervalMs: 5000,
     // Нет данных дольше этого — соединение считается потерянным.
     timeoutMs: 15000,

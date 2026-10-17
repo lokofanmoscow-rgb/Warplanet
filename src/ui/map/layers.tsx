@@ -318,6 +318,18 @@ export interface ArrowInfo {
   color: string;
 }
 
+/** Туман войны: клетки, где армий не видно, чуть темнее. Владельцы земель видны и так. */
+export const FogLayer = React.memo(function FogLayer({ geo, visible }: { geo: MapGeometry; visible: ReadonlySet<CellId> }) {
+  const path = useMemo(() => {
+    const b = Skia.PathBuilder.Make();
+    geo.cellPaths.forEach((p, id) => {
+      if (!visible.has(id)) b.addPath(p);
+    });
+    return b.build();
+  }, [geo, visible]);
+  return <Path path={path} color="rgba(24,16,8,0.32)" />;
+});
+
 /** Стрелки атак: от отряда на границе к цели. */
 export const ArrowLayer = React.memo(function ArrowLayer({ arrows, k }: { arrows: ArrowInfo[]; k: number }) {
   return (

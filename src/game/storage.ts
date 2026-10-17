@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { GameState } from '../engine';
+import { getMap, type GameState } from '../engine';
+import '../maps';
 
 // Сохранение и продолжение партии. Хост сохраняет состояние после каждого хода.
 
@@ -33,6 +34,8 @@ export async function loadGame(): Promise<SaveData | null> {
     if (!raw) return null;
     const data = JSON.parse(raw) as SaveData;
     if (data.version !== 1 || !data.game || data.game.finished) return null;
+    // Сохранение со старой версией карты (другое число клеток) продолжить нельзя.
+    if (data.game.cells.length !== getMap(data.game.mapId).cells.length) return null;
     return data;
   } catch {
     return null;
