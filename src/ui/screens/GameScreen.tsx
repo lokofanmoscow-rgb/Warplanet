@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, BackHandler, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CONFIG, getMap, isPeaceful, moveBlockReason, reachable, type CellId, type MoveKind } from '../../engine';
 import type { MatchController } from '../../game/controller';
@@ -37,6 +37,10 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   const hidden = c.handoff !== null;
 
   const [selected, setSelected] = useState<CellId | null>(null);
+  // Панель провинции открыта; иначе клетка только подсвечена (например, море).
+  const [panelOpen, setPanelOpen] = useState(false);
+  // Своя провинция с армией: сначала выбор «город или армия» рядом с пальцем.
+  const [chooser, setChooser] = useState<{ cell: CellId; x: number; y: number } | null>(null);
   const [moveFrom, setMoveFrom] = useState<CellId | null>(null);
   const [moveDialog, setMoveDialog] = useState<{ from: CellId; to: CellId; kind: MoveKind; steps: number } | null>(null);
   const [walk, setWalk] = useState<WalkInfo | null>(null);
@@ -55,6 +59,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   const [replay, setReplay] = useState<{ list: BattleView[]; index: number; result: boolean } | null>(null);
   useEffect(() => {
     setSelected(null);
+    setChooser(null);
     setMoveFrom(null);
     setMoveDialog(null);
     if (!c.log || game.turn <= 1) return;
@@ -111,6 +116,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (replay) endReplay();
+      else if (chooser) setChooser(null);
       else if (moveDialog || taxOpen || logOpen) {
         setMoveDialog(null);
         setTaxOpen(false);
@@ -120,7 +126,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
       return true;
     });
     return () => sub.remove();
-  }, [moveDialog, taxOpen, logOpen, selected, replay, endReplay]);
+  }, [moveDialog, taxOpen, logOpen, selected, replay, endReplay, chooser]);
 
   // Конец партии — итоги.
   const finishedSeen = game.finished && !logOpen && !replay;
@@ -153,6 +159,8 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     [insets.top, insets.bottom, insets.left, insets.right, s],
   );
 
+  const closeChooser = useCallback(() => setChooser(null), []);
+
   /** Открывает выбор числа солдат; если туда нельзя — объясняет почему. */
   const openMove = (from: CellId, to: CellId): boolean => {
     if (!editable || (plan.available[from] ?? 0) <= 0) return false;
@@ -165,22 +173,55 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     return true;
   };
 
-  const onTapCell = (cell: CellId | null) => {
+  /** Режим отправки армии: подсвечиваем, куда она может пойти. */
+  const startMove = (cell: CellId) => {
+    setChooser(null);
+    setSelected(null);
+    setPanelOpen(false);
+    setMoveFrom(cell);
+    setToast('Выберите подсвеченную клетку или перетащите армию');
+  };
+
+  /** Суша — панель с данными; море — только подсветка. */
+  const showCell = (cell: CellId) => {
+    setSelected(cell);
+    setPanelOpen(map.cells[cell].kind === 'land');
+  };
+
+  const onTapCell = (cell: CellId | null, at: { x: number; y: number }) => {
     if (replay) return;
+    setChooser(null);
     if (cell === null) {
       setSelected(null);
       setMoveFrom(null);
       return;
     }
-    if (moveFrom !== null && cell !== moveFrom) {
+    if (moveFrom !== null) {
+      const from = moveFrom;
       setMoveFrom(null);
-      // Нельзя туда — показываем причину и панель клетки (например, с кнопкой «Объявить войну»).
-      if (openMove(moveFrom, cell)) return;
-      setSelected(cell);
+      if (cell === from) return;
+      // Нельзя туда — причина уже в подсказке; показываем клетку (например, с кнопкой «Объявить войну»).
+      if (!openMove(from, cell)) showCell(cell);
       return;
     }
-    setMoveFrom(null);
-    setSelected(cell === selected ? null : cell);
+    if (cell === selected) {
+      setSelected(null);
+      return;
+    }
+    const movable = editable && (plan.available[cell] ?? 0) > 0;
+    if (map.cells[cell].kind === 'sea') {
+      // Свой флот — сразу отправка, иначе море просто светится.
+      if (movable) startMove(cell);
+      else showCell(cell);
+      return;
+    }
+    if (movable) {
+      setSelected(cell);
+      setPanelOpen(false);
+      setChooser({ cell, x: at.x, y: at.y });
+      return;
+    }
+    showCell(cell);
   };
 
   /** Приказ принят — армия сразу идёт по пути на карте. */
@@ -223,7 +264,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   }
 
   const panel =
-    selected !== null && !hidden && !replay ? (
+    selected !== null && panelOpen && !hidden && !replay ? (
       <ProvincePanel
         controller={c}
         map={map}
@@ -231,11 +272,6 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
         plan={plan}
         cell={selected}
         player={player}
-        onMove={(from) => {
-          setMoveFrom(from);
-          setSelected(null);
-          setToast('Выберите подсвеченную клетку или перетащите армию');
-        }}
         onClose={() => setSelected(null)}
         onError={setToast}
       />
@@ -264,6 +300,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
         targets={targets}
         draggable={draggable}
         onTapCell={onTapCell}
+        onViewChange={closeChooser}
         onDragMove={openMove}
         focusCell={focus}
         insets={mapInsets}
@@ -273,6 +310,23 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
       <View style={[styles.top, { top: insets.top + 6 * s, left: insets.left + 6 * s, right: insets.right + 6 * s }]} pointerEvents="box-none">
         <TopBar game={game} player={player} plan={plan} tax={orders.tax} onTax={() => setTaxOpen(true)} onMenu={() => setMenuOpen(true)} />
       </View>
+
+      {/* Город или армия */}
+      {chooser && !replay && !hidden && (
+        <CellChooser
+          x={chooser.x}
+          y={chooser.y}
+          top={insets.top + 80 * s}
+          width={width}
+          color={me?.color ?? COLORS.gold}
+          troops={plan.available[chooser.cell] ?? 0}
+          onCity={() => {
+            setChooser(null);
+            setPanelOpen(true);
+          }}
+          onArmy={() => startMove(chooser.cell)}
+        />
+      )}
 
       {/* Показ боя */}
       {replay && battle && (
@@ -310,8 +364,9 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
             <Panel style={{ maxHeight: '100%' }}>{panel}</Panel>
           </View>
         ) : (
-          <View style={[styles.sheet, { left: insets.left + 6 * s, right: insets.right + 6 * s, bottom: insets.bottom + 84 * s, maxHeight: height * 0.48 }]}>
-            <Panel style={{ maxHeight: '100%' }}>{panel}</Panel>
+          <View style={[styles.sheet, { left: insets.left + 6 * s, right: insets.right + 6 * s, bottom: insets.bottom + 84 * s }]}>
+            {/* Высота числом: проценты от блока без высоты Android не ограничивает, и кнопки вылезали за панель. */}
+            <Panel style={{ maxHeight: height * 0.5 }}>{panel}</Panel>
           </View>
         ))}
 
@@ -411,6 +466,61 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   );
 }
 
+/** Два квадрата рядом с пальцем: город (данные и действия) и армия (сразу отправка). */
+function CellChooser({
+  x,
+  y,
+  top,
+  width,
+  color,
+  troops,
+  onCity,
+  onArmy,
+}: {
+  x: number;
+  y: number;
+  top: number;
+  width: number;
+  color: string;
+  troops: number;
+  onCity: () => void;
+  onArmy: () => void;
+}) {
+  const { s } = useLayout();
+  const size = 60 * s;
+  const gap = 10 * s;
+  const total = size * 2 + gap;
+  const left = Math.max(8 * s, Math.min(width - total - 8 * s, x - total / 2));
+  // Над пальцем, а у верхнего края — под ним.
+  const above = y - size - 28 * s;
+  const posTop = above >= top ? above : y + 28 * s;
+  return (
+    <View style={[styles.chooser, { left, top: posTop, gap }]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Провинция"
+        onPress={onCity}
+        style={({ pressed }) => [styles.square, { width: size, height: size, borderRadius: 12 * s, opacity: pressed ? 0.75 : 1 }]}
+      >
+        <Icon name="city" size={44 * s} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Армия: ${troops}`}
+        onPress={onArmy}
+        style={({ pressed }) => [styles.square, { width: size, height: size, borderRadius: 12 * s, opacity: pressed ? 0.75 : 1 }]}
+      >
+        <Icon name="army" size={46 * s} color={color} />
+        <View style={[styles.badge, { right: -6 * s, bottom: -6 * s, paddingHorizontal: 5 * s, borderRadius: 6 * s }]}>
+          <T bold size={12}>
+            {troops}
+          </T>
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
 /** Надпись над боем: кто с кем, затем итог. */
 function BattleBanner({
   battle,
@@ -474,4 +584,18 @@ const styles = StyleSheet.create({
   readyRow: { flexDirection: 'row', backgroundColor: 'rgba(43,33,24,0.9)', borderWidth: 1, borderColor: COLORS.goldDark, alignSelf: 'center' },
   readyItem: { flexDirection: 'row', alignItems: 'center' },
   busy: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(20,14,9,0.45)' },
+  chooser: { position: 'absolute', flexDirection: 'row' },
+  square: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.panel,
+    borderWidth: 2,
+    borderColor: COLORS.gold,
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 8,
+  },
+  badge: { position: 'absolute', backgroundColor: COLORS.panelDeep, borderWidth: 1.5, borderColor: COLORS.gold },
 });

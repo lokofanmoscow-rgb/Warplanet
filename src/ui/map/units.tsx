@@ -104,7 +104,7 @@ function flash(x: number, y: number, r: number): number[] {
 }
 
 /** Отряд из трёх солдат в клетке 96×96 (ступни переднего — у нижнего края). */
-function SoldierGroup({ color, fight }: { color: string; fight: boolean }) {
+export function SoldierGroup({ color, fight }: { color: string; fight: boolean }) {
   return (
     <Group>
       <Soldier x={30} y={70} s={0.82} color={color} fight={fight} />

@@ -60,7 +60,6 @@ export function ProvincePanel({
   plan,
   cell,
   player,
-  onMove,
   onClose,
   onError,
 }: {
@@ -70,7 +69,6 @@ export function ProvincePanel({
   plan: PlanResult;
   cell: CellId;
   player: PlayerId;
-  onMove: (from: CellId) => void;
   onClose: () => void;
   onError: (msg: string) => void;
 }) {
@@ -102,22 +100,20 @@ export function ProvincePanel({
   const planned = orders.actions.map((a, i) => ({ a, i })).filter((x) => x.a.cell === cell);
   const plannedMoves = orders.moves.map((m, i) => ({ m, i })).filter((x) => x.m.from === cell);
   const hasAction = (t: Action['type']) => planned.some((x) => x.a.type === t);
-  const available = plan.available[cell] ?? 0;
   const adjacentOwn = def.neighbors.some((n) => map.cells[n].kind === 'land' && plan.projected.cells[n].owner === player);
 
   const tax = orders.tax;
   const income = (st.pop / CONFIG.economy.popPerGold) * (tax / 100) * incomeFactor(st.happiness);
   const ap = (n: number) => `${fmtAp(n)} ОД`;
 
-  // Чужая страна в этой клетке (провинция или флот) — мир, война или объявление в этом ходу.
-  const other = def.kind === 'land' ? st.owner : st.troops > 0 ? st.owner : null;
+  // Провинция другой страны — мир, война или объявление в этом ходу.
+  const other = st.owner;
   const foreign = other !== null && other !== player && !!game.players[other]?.alive;
   const declared = foreign && (orders.wars ?? []).includes(other!);
   const warNow = foreign && atWar(game, player, other!);
-  const sea = def.kind === 'sea';
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flexShrink: 1 }}>
       <View style={[styles.head, { gap: 8 * s }]}>
         <View style={{ flex: 1 }}>
           <Title size={20} numberOfLines={1}>
@@ -126,11 +122,7 @@ export function ProvincePanel({
           <View style={[styles.line, { gap: 6 * s }]}>
             {owner ? <Swatch color={owner.color} size={12} /> : null}
             <T dim size={13} numberOfLines={1}>
-              {def.kind === 'sea'
-                ? 'Морская зона'
-                : owner
-                  ? `${mine ? 'Ваша провинция' : owner.name}${isCapital ? ' · столица' : ''}`
-                  : 'Нейтральная провинция'}
+              {owner ? `${mine ? 'Ваша провинция' : owner.name}${isCapital ? ' · столица' : ''}` : 'Нейтральная провинция'}
             </T>
           </View>
         </View>
@@ -140,26 +132,16 @@ export function ProvincePanel({
       </View>
       <Divider />
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 2 * s }}>
-        {def.kind === 'land' ? (
-          <>
-            <Line label="Население" value={fmt(st.pop)} />
-            {st.owner !== null ? (
-              <Line label="Счастье" value={`${Math.round(st.happiness)}%`} hint={mine ? `→ ${Math.round(happinessTarget(tax))}%` : undefined} />
-            ) : null}
-            {mine ? <Line label="Доход" value={`+${income.toFixed(1)} за ход`} /> : null}
-            <Line
-              label={st.owner === null ? 'Ополчение' : 'Гарнизон'}
-              value={`${mine ? proj.troops : st.troops}${st.fortified ? ' · укреплена ×2' : ''}`}
-              hint={mine && available !== proj.troops ? `ходят ${available}` : undefined}
-            />
-          </>
-        ) : (
-          <Line
-            label="Флот"
-            value={proj.troops > 0 && proj.owner !== null ? `${proj.troops} · ${game.players[proj.owner].name}` : 'нет'}
-            hint={proj.owner === player && available !== proj.troops ? `ходят ${available}` : undefined}
-          />
-        )}
+        <Line label="Население" value={fmt(st.pop)} />
+        {st.owner !== null ? (
+          <Line label="Счастье" value={`${Math.round(st.happiness)}%`} hint={mine ? `→ ${Math.round(happinessTarget(tax))}%` : undefined} />
+        ) : null}
+        {mine ? <Line label="Доход" value={`+${income.toFixed(1)} за ход`} /> : null}
+        <Line
+          label={st.owner === null ? 'Ополчение' : 'Гарнизон'}
+          value={`${mine ? proj.troops : st.troops}${st.fortified ? ' · укреплена ×2' : ''}`}
+          hint={mine && plan.available[cell] !== proj.troops ? `ходят ${plan.available[cell]}` : undefined}
+        />
         {foreign && (
           <Line
             label="Отношения"
@@ -227,16 +209,6 @@ export function ProvincePanel({
               onPress={() => act({ type: 'buy', cell })}
             />
           </View>
-        )}
-
-        {editable && st.owner === player && available > 0 && (
-          <Button
-            small
-            icon="move"
-            label={`Отправить ${sea ? 'флот' : 'армию'} (${available}) · ${ap(CONFIG.move.ap)}`}
-            onPress={() => onMove(cell)}
-            style={{ marginTop: 8 * s }}
-          />
         )}
 
         {editable && foreign && !warNow && !declared && (

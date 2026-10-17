@@ -280,6 +280,7 @@ const styles = StyleSheet.create({
   },
   panelInner: {
     flexShrink: 1,
+    overflow: 'hidden',
     backgroundColor: COLORS.panel,
     borderWidth: 1,
     borderColor: COLORS.goldDark,

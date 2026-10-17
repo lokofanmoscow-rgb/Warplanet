@@ -3,6 +3,8 @@ import { Image as RNImage, Platform } from 'react-native';
 import { Canvas, Circle, Group, Path, Rect, RoundedRect, Skia, type SkPathBuilder } from '@shopify/react-native-skia';
 import { UI } from './assets.generated';
 import { renderImage } from './map/offscreen';
+import { City } from './map/sprites';
+import { SoldierGroup } from './map/units';
 import { COLORS } from './theme';
 
 // Иконки интерфейса 48×48: если в assets/ui лежит icon_<имя>.png — берётся он, иначе векторная заглушка.
@@ -27,9 +29,12 @@ export type IconName =
   | 'crown'
   | 'wifi'
   | 'close'
-  | 'swords';
+  | 'swords'
+  | 'city'
+  | 'army';
 
 const OUT = COLORS.border;
+const NO_IMAGES = {};
 
 function p(build: (path: SkPathBuilder) => void) {
   const b = Skia.PathBuilder.Make();
@@ -305,6 +310,16 @@ function Glyph({ name, color }: { name: IconName; color: string }) {
           strokeWidth={3}
           strokeCap="round"
         />
+      );
+    case 'city':
+      // Тот же город, что на карте.
+      return <City x={12} y={19.5} s={0.62} size="large" images={NO_IMAGES} />;
+    case 'army':
+      // Отряд в цвете игрока (color), как на карте.
+      return (
+        <Group transform={[{ translateX: -2.4 }, { translateY: -5.2 }, { scale: 0.31 }]}>
+          <SoldierGroup color={color} fight={false} />
+        </Group>
       );
     case 'swords':
       return (

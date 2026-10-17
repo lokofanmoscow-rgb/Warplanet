@@ -67,7 +67,10 @@ export interface MapViewProps {
   interactive?: boolean;
   /** Медленный дрейф карты (фон главного меню). */
   drift?: boolean;
-  onTapCell?: (cell: CellId | null) => void;
+  /** Тап по клетке; at — точка касания на экране (для меню рядом с пальцем). */
+  onTapCell?: (cell: CellId | null, at: { x: number; y: number }) => void;
+  /** Карту начали двигать или масштабировать. */
+  onViewChange?: () => void;
   onDragMove?: (from: CellId, to: CellId) => void;
   /** Сдвиг области карты от краёв экрана (панели интерфейса). */
   insets?: { top: number; bottom: number; left: number; right: number };
@@ -221,10 +224,11 @@ export function MapView(props: MapViewProps) {
     (sx: number, sy: number) => {
       const x = (sx - tx.value) / sc.value;
       const y = (sy - ty.value) / sc.value;
-      propsRef.current.onTapCell?.(cellAt(geo, x, y));
+      propsRef.current.onTapCell?.(cellAt(geo, x, y), { x: sx, y: sy });
     },
     [geo, sc, tx, ty],
   );
+  const viewChanged = useCallback(() => propsRef.current.onViewChange?.(), []);
   const handleDrop = useCallback(
     (from: number, x: number, y: number) => {
       const to = cellAt(geo, x, y);
@@ -287,6 +291,7 @@ export function MapView(props: MapViewProps) {
     onActivate: () => {
       'worklet';
       if (dragCell.value >= 0) dragging.value = true;
+      else runOnJS(viewChanged)();
     },
     onUpdate: (e) => {
       'worklet';
@@ -323,6 +328,7 @@ export function MapView(props: MapViewProps) {
       'worklet';
       pinching.value = true;
       pinchLast.value = { scale: e.scale, fx: e.focalX, fy: e.focalY, n: e.numberOfPointers };
+      runOnJS(viewChanged)();
     },
     onUpdate: (e) => {
       'worklet';
