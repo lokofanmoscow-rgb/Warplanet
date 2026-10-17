@@ -71,6 +71,20 @@ export function previewEconomy(state: GameState, map: MapDef, playerId: PlayerId
     : { income, upkeep, paid: false, gold: 0 };
 }
 
+/**
+ * Доход следующего хода при налоге tax: счастье к тому времени сдвинется к цели этого налога.
+ * Прирост населения не учитывается — это оценка для окна налога.
+ */
+export function forecastIncome(state: GameState, map: MapDef, playerId: PlayerId, tax: number): number {
+  const target = happinessTarget(tax);
+  let sum = 0;
+  state.cells.forEach((cell, id) => {
+    if (cell.owner !== playerId || map.cells[id].kind !== 'land') return;
+    sum += cellIncome({ ...cell, happiness: Math.round(nextHappiness(cell.happiness, target)) }, tax);
+  });
+  return Math.floor(sum * incomeMultiplier(state.players[playerId]));
+}
+
 export function unpaidLoss(troops: number): number {
   return Math.ceil(troops * E.unpaidLoss);
 }
@@ -124,5 +138,6 @@ export function stepToward(value: number, target: number, step: number): number 
 }
 
 export function militiaFor(pop: number): number {
-  return Math.round(pop / CONFIG.neutral.militiaPer);
+  const N = CONFIG.neutral;
+  return Math.min(N.militiaMax, Math.max(N.militiaMin, Math.round(pop / N.militiaPer)));
 }

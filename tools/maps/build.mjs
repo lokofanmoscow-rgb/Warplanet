@@ -56,6 +56,14 @@ const mergeExpr = `adm0_a3 = (${q(cfg.merge)})[adm0_a3] || adm0_a3`;
 // ---------- 1. Играбельные регионы (долгота/широта) ----------
 
 log('1. Регионы…');
+// Озёра, которые в Natural Earth входят в регионы (Великие озёра в штатах США), вырезаются — там вода.
+const lakes = cfg.eraseLakes?.length
+  ? (await ms(
+      `-i ${shp('ne_10m_lakes')} name=lakes -filter ${q(`${q(cfg.eraseLakes)}.indexOf(name) > -1`)} -o format=geojson lakes.json`,
+    )).lakes
+  : null;
+if (lakes) log(`   вырезаю озёра: ${lakes.features.length}`);
+
 // Регионы стран из списка, обрезанные рамкой clip (bbox=… или файлом с контуром).
 async function loadPlay(list, clip, files = {}) {
   const { play } = await ms(
@@ -63,10 +71,11 @@ async function loadPlay(list, clip, files = {}) {
       `-each ${q(mergeExpr)} ` +
       `-filter ${q(`${q(list)}.indexOf(adm0_a3) > -1`)} ` +
       `-clip ${clip} ` +
+      (lakes ? '-erase lakes.json ' : '') +
       `-filter-islands min-area=${cfg.minIslandKm2}km2 remove-empty ` +
       `-filter-fields adm0_a3,name,name_ru ` +
       `-o format=geojson precision=0.000001 play.json`,
-    files,
+    lakes ? { ...files, 'lakes.json': lakes } : files,
   );
   return play.features.filter((f) => f.geometry && geometryArea(f.geometry) > 0);
 }
@@ -144,6 +153,13 @@ for (const r of regions) {
   r.lonlat = c;
 }
 
+// Регионы, переданные другой стране (анклавы и отрезанные куски): точка внутри региона → код страны.
+for (const rc of cfg.regionCountry ?? []) {
+  const hit = regions.filter((r) => pointInGeometry(rc.at, r.geometry));
+  for (const r of hit) r.properties.adm0_a3 = rc.to;
+  if (!hit.length) log(`   ! ${rc.name}: регион не найден`);
+}
+
 // Отдельные провинции из настроек: регион выделяется в собственную «страну» из одной провинции.
 for (const [k, sep] of (cfg.separate ?? []).entries()) {
   const hit = regions.filter((r) => pointInGeometry(sep.at, r.geometry));
@@ -197,7 +213,8 @@ for (const code of [...cfg.countries, ...separateCodes]) {
 
 log('2. Провинции…');
 // onePerCountry: каждая страна — одна провинция целиком (с островами), без разбиения.
-const splitCountries = !cfg.onePerCountry;
+// onePerRegion: каждый регион 1-го уровня (штат) — своя провинция; regionMerge присоединяет мелкие к соседу.
+const splitCountries = !cfg.onePerCountry && !cfg.onePerRegion;
 // Компоненты связности каждой страны: общие границы + узкие проливы.
 for (const c of splitCountries ? Object.values(country) : []) {
   const regs = c.regions;
@@ -298,11 +315,19 @@ if (splitCountries) {
 // Разбиение компонент на группы.
 let provCount = 0;
 const provOfRegion = new Map();
-if (!splitCountries) {
+if (cfg.onePerCountry) {
   for (const c of Object.values(country)) {
     if (!c.regions.length) continue;
     for (const r of c.regions) provOfRegion.set(r, provCount);
     provCount++;
+  }
+}
+if (cfg.onePerRegion) {
+  const byKey = new Map();
+  for (const r of regions) {
+    const key = cfg.regionMerge?.[r.properties.name] ?? r.properties.name;
+    if (!byKey.has(key)) byKey.set(key, provCount++);
+    provOfRegion.set(r, byKey.get(key));
   }
 }
 for (const c of splitCountries ? Object.values(country) : []) {
@@ -538,6 +563,10 @@ for (const c of landCells) {
     c.name = c.separateName;
   } else if (cfg.nameBy === 'country') {
     c.name = countryName(c.adm0);
+  } else if (cfg.nameBy === 'region') {
+    // Имя самого большого региона провинции (штата, к которому присоединены мелкие).
+    const reg = regions.filter((r) => provOfRegion.get(r) === c.f.properties.prov).sort((a, b) => b.area - a.area)[0];
+    c.name = reg?.properties.name_ru || reg?.properties.name || `Провинция ${c.f.properties.prov}`;
   } else if (pick) {
     c.name = pick.NAME_RU;
   } else {
@@ -579,7 +608,8 @@ const outCells = all.map((c, id) => {
   };
   if (c.kind === 'land') {
     base.coastal = neighbors.some((n) => all[n].kind === 'sea');
-    base.country = c.adm0.startsWith('SEP') ? undefined : c.adm0;
+    // На карте штатов страна одна — ИИ называются по своему штату, а не «США».
+    base.country = c.adm0.startsWith('SEP') || cfg.onePerRegion ? undefined : c.adm0;
   }
   return base;
 });
@@ -615,7 +645,7 @@ const result = {
   startPoints,
   straits,
   // Русские названия стран — так называются ИИ-соперники по своей столице.
-  countries: Object.fromEntries(cfg.countries.map((code) => [code, countryName(code)])),
+  countries: cfg.onePerRegion ? {} : Object.fromEntries(cfg.countries.map((code) => [code, countryName(code)])),
   decor: {
     mountains: (cfg.mountains ?? [])
       .map((p) => projection(p))

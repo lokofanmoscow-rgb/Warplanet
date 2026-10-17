@@ -42,13 +42,18 @@ export class MatchController {
   private planCache: { key: string; result: PlanResult } | null = null;
   private unsubscribeNet: (() => void) | null = null;
 
+  /** Сообщение для игрока (например, что хост вышел и партия продолжается на этом телефоне). */
+  notice: string | null = null;
+
   constructor(
-    readonly mode: Mode,
+    /** Клиент становится 'ai', если выбывший хост вышел из игры. */
+    public mode: Mode,
     game: GameState,
     private net: { host?: GameHost; client?: GameClient; clientId?: string | null } = {},
   ) {
     this.game = game;
-    this.active = this.localPlayers()[0] ?? 0;
+    // Выбывшие игроки приказов не отдают — начинаем с первого живого.
+    this.active = this.localPlayers().find((p) => game.players[p]?.alive) ?? this.localPlayers()[0] ?? 0;
     if (mode === 'hotseat') this.handoff = this.active;
     const source = net.host ?? net.client;
     if (source) this.unsubscribeNet = source.subscribe(() => this.syncFromNet());
@@ -292,6 +297,11 @@ export class MatchController {
     this.emit();
   }
 
+  dismissNotice(): void {
+    this.notice = null;
+    this.emit();
+  }
+
   dismissLog(): void {
     this.log = null;
     this.emit();
@@ -333,7 +343,30 @@ export class MatchController {
   syncFromNet(): void {
     const g = this.mode === 'host' ? this.net.host?.game : this.net.client?.game;
     if (g && g !== this.game) this.applyNewState(g);
-    else this.emit();
+    if (this.takeOverFromHost()) return;
+    this.emit();
+  }
+
+  /**
+   * Хост выбыл и связь с ним пропала (он вышел из игры): второй игрок доигрывает с ИИ
+   * на этом телефоне — у клиента есть полное состояние партии, ходы ИИ считаются здесь.
+   */
+  private takeOverFromHost(): boolean {
+    const client = this.net.client;
+    if (this.mode !== 'client' || !client || client.status === 'connected' || client.status === 'connecting') return false;
+    const g = this.game;
+    if (g.finished || g.players[0]?.alive !== false || !g.players[this.active]?.alive) return false;
+    this.unsubscribeNet?.();
+    this.unsubscribeNet = null;
+    client.close();
+    this.net = {};
+    this.mode = 'ai';
+    // Приказы этого хода до хоста могли не дойти — «Готово» нажимается снова, черновик остаётся.
+    this.submitted.clear();
+    this.notice = 'Хост выбыл и вышел из игры. Вы доигрываете с ИИ на этом телефоне — партия сохраняется после каждого хода.';
+    void saveGame({ mode: 'ai', game: g });
+    this.emit();
+    return true;
   }
 
   dispose(): void {

@@ -39,11 +39,12 @@ export function resolveTurn(prev: GameState, orders: OrdersByPlayer): GameState 
   const alive = state.players.filter((p) => p.alive);
   const ordersOf = (id: PlayerId): PlayerOrders => orders[id] ?? emptyOrders(prev, id);
 
-  // Налог ставится в фазе планирования и действует уже в этом ходу.
-  for (const p of alive) p.tax = clampTax(ordersOf(p.id).tax);
-
-  // 2. Экономика.
+  // 2. Экономика: доход этого хода — по налогу, который уже действует (выбран в прошлом ходу).
   applyEconomy(state, map, log);
+
+  // Новый налог действует со следующего хода: в конце этого хода к нему тянется счастье,
+  // а доход по нему — в следующем. Поднять налог и сразу получить золото нельзя.
+  for (const p of alive) p.tax = clampTax(ordersOf(p.id).tax);
 
   // Объявления войны действуют уже в этом ходу: можно объявить и сразу атаковать.
   for (const p of alive) {

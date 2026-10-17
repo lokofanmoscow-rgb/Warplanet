@@ -3,15 +3,18 @@ import {
   applyGrowth,
   cellIncome,
   clampTax,
+  forecastIncome,
   happinessTarget,
   incomeFactor,
+  nextHappiness,
   playerIncome,
   playerUpkeep,
   previewEconomy,
 } from '../economy';
+import { simulatePlan } from '../plan';
 import { resolveTurn } from '../turn';
 import type { TurnEvent } from '../types';
-import { blankState, lineMap, own, ordersFor } from './helpers';
+import { blankState, lineMap, orders, own, ordersFor } from './helpers';
 
 describe('экономика', () => {
   const map = lineMap();
@@ -132,16 +135,35 @@ describe('экономика', () => {
     expect(s.cells[0].happiness).toBe(54);
   });
 
-  test('налог из приказов действует уже в этом ходу', () => {
+  test('новый налог действует со следующего хода, счастье к нему тянется уже в конце этого', () => {
     const s = blankState(map);
     own(s, 0, 0, 0);
     own(s, 5, 1, 0);
     s.cells[0].pop = 10000;
+    s.cells[0].happiness = 70;
     s.players[0].tax = 0;
     s.players[0].gold = 0;
+    // В прогнозе доход этого хода — по действующему налогу 0%.
+    expect(simulatePlan(s, 0, orders({ tax: 90 })).economy.income).toBe(0);
     const next = resolveTurn(s, ordersFor(s, { 0: { tax: 200 } }));
     // Больше 90% нельзя.
     expect(next.players[0].tax).toBe(90);
-    expect(next.players[0].gold).toBe(9);
+    expect(next.players[0].gold).toBe(0);
+    expect(next.cells[0].happiness).toBe(Math.round(nextHappiness(70, happinessTarget(90))));
+    // Следующий ход: доход уже по 90% и при упавшем счастье.
+    const after = resolveTurn(next, ordersFor(next, { 0: { tax: 90 } }));
+    expect(after.players[0].gold).toBe(Math.floor((next.cells[0].pop / 1000) * 0.9));
+  });
+
+  test('оценка дохода со следующего хода учитывает, куда сдвинется счастье', () => {
+    const s = blankState(map);
+    own(s, 0, 0, 0);
+    s.cells[0].pop = 10000;
+    s.cells[0].happiness = 70;
+    // 70 → 52: доход ещё полный.
+    expect(forecastIncome(s, map, 0, 90)).toBe(9);
+    // 40 → 33: только четверть.
+    s.cells[0].happiness = 40;
+    expect(forecastIncome(s, map, 0, 90)).toBe(2);
   });
 });

@@ -34,9 +34,10 @@ export function simulatePlan(state: GameState, playerId: PlayerId, orders: Playe
   const map = getMap(state.mapId);
   const projected = cloneState(state);
   const player = projected.players[playerId];
-  player.tax = clampTax(orders.tax);
-  const economy = previewEconomy(state, map, playerId, player.tax);
+  // Доход этого хода — по действующему налогу; выбранный налог — со следующего хода.
+  const economy = previewEconomy(state, map, playerId, state.players[playerId].tax);
   player.gold = economy.gold;
+  player.tax = clampTax(orders.tax);
   if (!economy.paid) {
     for (const cell of projected.cells) {
       if (cell.owner === playerId && cell.troops > 0) cell.troops -= unpaidLoss(cell.troops);

@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CONFIG,
+  forecastIncome,
   getMap,
   happinessTarget,
   previewEconomy,
@@ -133,22 +134,27 @@ export function TaxDialog({
   const { s } = useLayout();
   const [tax, setTax] = useState(value);
   const map = getMap(game.mapId);
-  const eco = previewEconomy(game, map, player, tax);
+  // Этот ход платит по действующему налогу; выбранный — со следующего хода.
+  const current = game.players[player].tax;
+  const now = previewEconomy(game, map, player, current);
+  const later = forecastIncome(game, map, player, tax);
   const E = CONFIG.economy;
   return (
     <Overlay onDismiss={onCancel}>
       <Title size={20}>Налог</Title>
       <T dim size={13} style={{ marginTop: 4 * s }}>
-        Высокий налог даёт больше золота, но снижает счастье. Счастье растёт на {E.happinessStep} пунктов за ход, а падает быстрее.
-        Ниже {CONFIG.revolt.below}% возможны восстания: провинция может стать ничейной.
+        Новый налог начнёт приносить доход со следующего хода, а счастье потянется к его цели уже в конце этого хода. Счастье растёт
+        на {E.happinessStep} пунктов за ход, а падает быстрее. Ниже {CONFIG.revolt.below}% возможны восстания: провинция может стать
+        ничейной.
       </T>
       <View style={{ alignItems: 'center', marginVertical: 14 * s }}>
         <Stepper value={tax} min={E.taxMin} max={E.taxMax} step={E.taxStep} big={50} format={(v) => `${v}%`} onChange={editable ? setTax : () => {}} />
       </View>
       <View style={{ gap: 4 * s, marginBottom: 14 * s }}>
         <T>Цель счастья: {Math.round(happinessTarget(tax))}%</T>
-        <T>
-          Доход: +{eco.income}, содержание армии: −{eco.upkeep}
+        <T>Доход со следующего хода: ≈ +{later}</T>
+        <T dim size={13}>
+          В этом ходу — налог {current}%: доход +{now.income}, содержание армии −{now.upkeep}
         </T>
         <T dim size={12}>
           Доход полный при счастье от {E.fullAt}%, четверть при {E.partialAt}–{E.fullAt - 1}%, ниже — нет дохода.

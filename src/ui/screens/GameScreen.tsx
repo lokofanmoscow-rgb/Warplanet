@@ -124,9 +124,12 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   }, [waitingClient]);
 
   const exit = useCallback(() => {
+    // Выбывший хост уходит насовсем: партию доигрывает второй телефон, продолжать здесь нечего.
+    if (c.mode === 'host' && !c.game.players[c.active]?.alive) void clearSave();
     c.dispose();
     go({ name: 'menu' });
   }, [c, go]);
+
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -271,7 +274,8 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   // Сетевые подсказки.
   let banner: string | null = null;
   if (c.mode === 'host' && c.host && !game.finished) {
-    if (!c.host.clientConnected) {
+    // Выбывший второй игрок может уйти — это не обрыв связи.
+    if (!c.host.clientConnected && !c.host.clientOut()) {
       if (c.host.paused) banner = 'Пауза: второй игрок не вернулся. Партия сохранена — можно выйти и продолжить позже.';
       else if (c.host.disconnectedAt !== null) {
         const left = Math.max(0, Math.floor((CONFIG.net.reconnectWaitMs - (now - c.host.disconnectedAt)) / 1000));
@@ -283,6 +287,12 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     if (c.client.status === 'reconnecting') banner = 'Связь с хостом потеряна, переподключение…';
     else if (c.client.status === 'closed' || c.client.status === 'rejected') banner = `Соединение закрыто${c.client.reason ? `: ${c.client.reason}` : ''}`;
     else if (submitted && !game.finished) banner = 'Приказы отданы. Ждём хоста…';
+  }
+  if ((c.mode === 'host' || c.mode === 'client') && me && !me.alive && !game.finished && !banner) {
+    banner =
+      c.mode === 'host'
+        ? 'Вы выбыли. Можно смотреть дальше или выйти через меню — второй игрок доиграет с ИИ на своём телефоне.'
+        : 'Вы выбыли. Можно смотреть дальше или выйти через меню — хост доиграет без вас.';
   }
 
   const panel =
@@ -302,7 +312,16 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
 
   // «Готово» видно, только когда на экране нет панелей и окон — чтобы не нажать его случайно.
   const windowOpen =
-    panel !== null || chooser !== null || moveFrom !== null || moveDialog !== null || taxOpen || logOpen || menuOpen || news !== null || confirmEnd;
+    panel !== null ||
+    chooser !== null ||
+    moveFrom !== null ||
+    moveDialog !== null ||
+    taxOpen ||
+    logOpen ||
+    menuOpen ||
+    news !== null ||
+    c.notice !== null ||
+    confirmEnd;
 
   return (
     <View style={styles.root}>
@@ -494,6 +513,8 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
         />
       )}
       {news && <NewsDialog war={news.war} items={news.items} onClose={closeNews} />}
+      {/* Сообщение контроллера (хост вышел — доигрываем здесь) — окном с кнопкой «ОК». */}
+      {c.notice && !news && <NewsDialog war={false} items={[{ text: c.notice, bad: false }]} onClose={() => c.dismissNotice()} />}
       {c.handoff !== null && !logOpen && !replay && !news && !game.finished && <HandoffScreen game={game} player={c.handoff} onReady={() => c.takeOver()} />}
       {menuOpen && (
         <GameMenu

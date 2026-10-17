@@ -105,8 +105,9 @@ export function ProvincePanel({
   const hasAction = (t: Action['type']) => planned.some((x) => x.a.type === t);
   const adjacentOwn = def.neighbors.some((n) => map.cells[n].kind === 'land' && plan.projected.cells[n].owner === player);
 
+  // Доход этого хода — по действующему налогу, цель счастья — по выбранному (он действует со следующего хода).
   const tax = orders.tax;
-  const income = (st.pop / CONFIG.economy.popPerGold) * (tax / 100) * incomeFactor(st.happiness);
+  const income = (st.pop / CONFIG.economy.popPerGold) * (game.players[player].tax / 100) * incomeFactor(st.happiness);
   const ap = (n: number) => `${fmtAp(n)} ОД`;
 
   // Провинция другой страны — мир, война или объявление в этом ходу.

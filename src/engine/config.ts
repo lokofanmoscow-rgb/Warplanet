@@ -19,8 +19,10 @@ export const CONFIG = {
   },
 
   neutral: {
-    // Ополчение нейтральной провинции = население / militiaPer.
-    militiaPer: 1000,
+    // Ополчение нейтральной провинции = население / militiaPer, но не меньше militiaMin и не больше militiaMax.
+    militiaPer: 3000,
+    militiaMin: 4,
+    militiaMax: 15,
     // Доля целевого ополчения, восстанавливаемая за ход после боёв.
     militiaRegen: 0.1,
     // При покупке ополчение распускается (true — переходит к покупателю).
@@ -136,7 +138,7 @@ export const CONFIG = {
   net: {
     port: 47630,
     serviceType: 'conquest',
-    protocolVersion: 4,
+    protocolVersion: 5,
     pingIntervalMs: 5000,
     // Нет данных дольше этого — соединение считается потерянным.
     timeoutMs: 15000,

@@ -22,7 +22,8 @@ describe.each(MAPS.map((m) => [m.id, m] as const))('карта %s', (_, map) => 
   test('провинции и морские зоны по ТЗ', () => {
     const land = map.cells.filter((c) => c.kind === 'land');
     const sea = map.cells.filter((c) => c.kind === 'sea');
-    expect(land.length).toBeGreaterThanOrEqual(50);
+    // Европа — около 90 провинций; Африка и США — по клетке на страну или штат (40–50).
+    expect(land.length).toBeGreaterThanOrEqual(40);
     expect(land.length).toBeLessThanOrEqual(100);
     expect(sea.length).toBeGreaterThanOrEqual(15);
     for (const c of land) {

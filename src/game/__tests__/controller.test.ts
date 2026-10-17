@@ -106,4 +106,64 @@ describe('контроллер партии', () => {
     cc.dispose();
     hc.dispose();
   });
+
+  /** Хост и клиент в начатой партии; kill — кто из живых игроков выбыл. */
+  async function netGame(kill: 0 | 1) {
+    const timing = { pingIntervalMs: 50, timeoutMs: 1000, reconnectWaitMs: 200, retryMs: 100 };
+    const host = new GameHost({ net: netModule, port: 48500 + Math.floor(Math.random() * 300), hostName: 'Хост', mapId: DEFAULT_MAP_ID, timing });
+    await host.start();
+    const client = new GameClient({ net: netModule, host: '127.0.0.1', port: host.port, name: 'Клиент', clientId: 'id-2', timing });
+    client.connect();
+    await waitFor(() => host.lobby.clientConnected);
+    host.setSettings({ aiCount: 2 });
+    host.startGame(9);
+    // Выбывание: у игрока не осталось земли (как после поражения).
+    const g = host.game!;
+    g.players[kill].alive = false;
+    for (const cell of g.cells) if (cell.owner === kill) cell.owner = null;
+    host.game = { ...g };
+    (host as unknown as { broadcastState(): void }).broadcastState();
+    await waitFor(() => client.game?.players[kill].alive === false);
+    const hc = new MatchController('host', host.game!, { host });
+    const cc = new MatchController('client', client.game!, { client });
+    return { host, client, hc, cc };
+  }
+
+  test('по сети: выбывший второй игрок уходит — хост не ждёт и не ставит паузу', async () => {
+    const { host, hc, cc } = await netGame(1);
+    cc.dispose();
+    await waitFor(() => !host.clientConnected);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(host.disconnectedAt).toBeNull();
+    expect(host.paused).toBe(false);
+    // Хост доигрывает один: ход считается без второго игрока.
+    hc.ready();
+    await waitFor(() => hc.game.turn === 2);
+    hc.dispose();
+  });
+
+  test('по сети: выбывший хост выходит — клиент доигрывает с ИИ на своём телефоне', async () => {
+    const { host, hc, cc } = await netGame(0);
+    expect(cc.mode).toBe('client');
+    cc.setTax(70);
+    cc.ready();
+    // Хост выходит, не дождавшись хода.
+    hc.dispose();
+    expect(host.clientConnected).toBe(false);
+    await waitFor(() => cc.mode === 'ai');
+    expect(cc.notice).toMatch(/доигрываете с ИИ/);
+    expect(cc.active).toBe(1);
+    // Приказы этого хода до хоста не дошли — «Готово» снова, черновик сохранился.
+    expect(cc.canEdit()).toBe(true);
+    expect(cc.orders().tax).toBe(70);
+    cc.ready();
+    await waitFor(() => cc.game.turn === 2);
+    expect(cc.game.players[1].tax).toBe(70);
+    const save = await loadGame();
+    expect(save?.mode).toBe('ai');
+    expect(save?.game.turn).toBe(2);
+    // «Продолжить» с этого сохранения — снова за второго игрока.
+    expect(new MatchController('ai', save!.game).active).toBe(1);
+    cc.dispose();
+  });
 });

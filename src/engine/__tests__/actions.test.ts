@@ -131,6 +131,7 @@ describe('очки действия и действия в провинциях'
     own(s, 0, 0, 0);
     s.cells[0].pop = 20000;
     s.players[0].gold = 0;
+    s.players[0].tax = 90;
     const plan = simulatePlan(
       s,
       0,

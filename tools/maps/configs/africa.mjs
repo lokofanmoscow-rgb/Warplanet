@@ -3,10 +3,9 @@
 // Координаты — долгота, широта.
 
 const AFRICA = [
-  'DZA', 'AGO', 'BEN', 'BWA', 'BFA', 'BDI', 'CMR', 'CAF', 'TCD', 'COD', 'COG', 'CIV', 'DJI', 'EGY',
-  'GNQ', 'ERI', 'SWZ', 'ETH', 'GAB', 'GMB', 'GHA', 'GIN', 'GNB', 'KEN', 'LSO', 'LBR', 'LBY', 'MDG',
-  'MWI', 'MLI', 'MRT', 'MAR', 'MOZ', 'NAM', 'NER', 'NGA', 'RWA', 'SEN', 'SLE', 'SOM', 'ZAF', 'SDS',
-  'SDN', 'TZA', 'TGO', 'TUN', 'UGA', 'ZMB', 'ZWE', 'SAH',
+  'DZA', 'AGO', 'BEN', 'BWA', 'BFA', 'CMR', 'CAF', 'TCD', 'COD', 'COG', 'CIV', 'EGY', 'ERI', 'ETH',
+  'GAB', 'GHA', 'GIN', 'KEN', 'LBR', 'LBY', 'MDG', 'MWI', 'MLI', 'MRT', 'MAR', 'MOZ', 'NAM', 'NER',
+  'NGA', 'SEN', 'SLE', 'SOM', 'ZAF', 'SDS', 'SDN', 'TZA', 'TGO', 'TUN', 'UGA', 'ZMB', 'ZWE', 'SAH',
 ];
 
 export default {
@@ -23,20 +22,31 @@ export default {
   // Чужой суши (Европа, Аравия, острова других стран) нет — там вода.
   background: false,
 
-  // Сомалиленд — к Сомали, Бир-Тавиль — к Судану.
-  merge: { SOL: 'SOM', BRT: 'SDN' },
+  // Сомалиленд — к Сомали, Бир-Тавиль — к Судану. Микрогосударства (меньше ~40 тыс. км²) — к соседу:
+  // Лесото и Эсватини — к ЮАР, Гамбия — к Сенегалу, Гвинея-Бисау — к Гвинее, Джибути — к Эфиопии,
+  // Руанда — к Уганде, Бурунди — к Танзании, Экваториальная Гвинея — к Габону.
+  merge: {
+    SOL: 'SOM', BRT: 'SDN', LSO: 'ZAF', SWZ: 'ZAF', GMB: 'SEN', GNB: 'GIN', DJI: 'ETH', RWA: 'UGA',
+    BDI: 'TZA', GNQ: 'GAB',
+  },
+  // Отдельные куски стран — к соседней стране: Кабинда (Ангола) — к Конго. Западная Сахара — одна целая
+  // клетка: в Natural Earth её запад записан регионами Марокко, а сама она — узкая полоса за ними.
+  regionCountry: [
+    { name: 'Кабинда', at: [12.4, -5.1], to: 'COG' },
+    { name: 'Эль-Аюн', at: [-13.2, 27.15], to: 'SAH' },
+    { name: 'Дахла', at: [-15.0, 23.0], to: 'SAH' },
+  ],
 
   countryNames: {
     COD: 'ДР Конго',
     COG: 'Конго',
     CAF: 'ЦАР',
-    GNQ: 'Экв. Гвинея',
     SDS: 'Южный Судан',
     SAH: 'Западная Сахара',
   },
 
-  // Мелкие островные государства (Кабо-Верде, Коморы, Сан-Томе) не проходят по площади.
-  minIslandKm2: 1500,
+  // Острова меньше этого отбрасываются: Кабо-Верде, Коморы, Сан-Томе, Биоко, Занзибар.
+  minIslandKm2: 2500,
   linkKm: 45,
 
   projection: { type: 'azimuthalEqualArea', rotate: [-17, -2] },

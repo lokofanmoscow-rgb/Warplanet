@@ -11,6 +11,8 @@ const SOURCES = {
   ne_10m_admin_1_states_provinces: 'cultural',
   ne_10m_admin_0_countries: 'cultural',
   ne_10m_populated_places: 'cultural',
+  // Озёра — чтобы вырезать Великие озёра из штатов США.
+  ne_10m_lakes: 'physical',
 };
 
 export function shp(name) {

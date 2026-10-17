@@ -1,3 +1,4 @@
+import { militiaFor } from '../economy';
 import { createGame } from '../setup';
 import { resolveTurn } from '../turn';
 import { blankState, lineMap, makeMap, own, ordersFor } from './helpers';
@@ -161,7 +162,9 @@ describe('старт партии', () => {
     expect(s.cells.filter((c) => c.owner === 1)).toHaveLength(3);
     expect(s.cells[0].troops).toBe(30);
     expect(s.players[0].gold).toBe(50);
-    expect(s.cells[4]).toMatchObject({ owner: null, troops: 8, happiness: 70 });
+    // Ополчение: население / 3000, от 4 до 15.
+    expect(s.cells[4]).toMatchObject({ owner: null, troops: 4, happiness: 70 });
+    expect([militiaFor(5000), militiaFor(30000), militiaFor(50000), militiaFor(100000)]).toEqual([4, 10, 15, 15]);
   });
 
   test('живой игрок не может занять чужую стартовую точку', () => {

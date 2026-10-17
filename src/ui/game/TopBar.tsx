@@ -124,7 +124,8 @@ export function TopBar({
         <GoldDelta gold={plan.goldLeft} owner={`${game.turn}|${player}`} />
       </Stat>
       <Stat icon="ap" label="Очки действия" value={`${fmtAp(plan.apLeft)}/${plan.apTotal}`} sub="ОД" />
-      <Stat icon="tax" label="Налог" value={`${tax}%`} sub="налог ›" onPress={onTax} />
+      {/* Выбранный налог действует со следующего хода — пока он другой, видно, какой платится сейчас. */}
+      <Stat icon="tax" label="Налог" value={`${tax}%`} sub={tax !== p.tax ? `сейчас ${p.tax}% ›` : 'налог ›'} onPress={onTax} />
       <Stat icon="happiness" label="Счастье" value={`${Math.round(happy)}%`} sub={`цель ${Math.round(happinessTarget(tax))}%`} />
       <Stat icon="turn" label="Ход" value={`${game.turn}`} sub={limit > 0 ? `из ${limit}` : 'ход'} />
       <Pressable accessibilityRole="button" accessibilityLabel="Меню" onPress={onMenu} style={[styles.menu, { width: 40 * s, height: 40 * s, borderRadius: 20 * s }]}>

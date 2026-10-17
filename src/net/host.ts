@@ -153,16 +153,23 @@ export class GameHost {
     return this.game;
   }
 
-  /** Продолжение сохранённой партии: ждём, пока клиент переподключится. */
+  /** Продолжение сохранённой партии: ждём, пока клиент переподключится (если он ещё в игре). */
   resume(game: GameState, clientId: string | null): void {
     this.game = game;
     this.phase = 'game';
     this.clientId = clientId;
     this.lobby.clientName = game.players[CLIENT_SLOT]?.name ?? null;
     this.orders.clear();
-    this.disconnectedAt = Date.now();
-    this.schedulePause();
+    if (!this.clientOut()) {
+      this.disconnectedAt = Date.now();
+      this.schedulePause();
+    }
     this.changed();
+  }
+
+  /** Второй живой игрок выбыл: его уход — не обрыв связи, партия идёт дальше без него. */
+  clientOut(): boolean {
+    return this.phase === 'game' && !!this.game && this.game.players[CLIENT_SLOT]?.alive === false;
   }
 
   // ---------- Ходы ----------
@@ -262,7 +269,7 @@ export class GameHost {
       this.clientId = null;
       this.lobby.clientName = null;
       this.lobby.starts[1] = null;
-    } else {
+    } else if (!this.clientOut()) {
       this.disconnectedAt = Date.now();
       this.schedulePause();
     }
