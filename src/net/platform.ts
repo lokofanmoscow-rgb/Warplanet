@@ -6,8 +6,15 @@ export const networkAvailable = Platform.OS === 'android' || Platform.OS === 'io
 
 export function getNet(): NetModule {
   if (!networkAvailable) throw new Error('Сеть недоступна на этой платформе');
+  // Библиотека задаёт и export default, и module.exports; после сборки остаётся только второе,
+  // поэтому .default там нет — берём сам модуль (а .default — если когда-нибудь появится).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('react-native-tcp-socket').default as NetModule;
+  const mod = require('react-native-tcp-socket') as { default?: NetModule } & Partial<NetModule>;
+  const net = (mod.default ?? mod) as NetModule;
+  if (typeof net?.createServer !== 'function' || typeof net.createConnection !== 'function') {
+    throw new Error('Сетевой модуль не загрузился');
+  }
+  return net;
 }
 
 /** IP телефона в Wi-Fi сети — хост показывает его в лобби. */

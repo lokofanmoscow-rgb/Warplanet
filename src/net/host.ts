@@ -55,17 +55,20 @@ export class GameHost {
 
   /** Запуск сервера. Если порт занят — пробует следующие. */
   async start(): Promise<number> {
+    let last = '';
     for (let attempt = 0; attempt < 10; attempt++) {
       const port = this.opts.port + attempt;
       try {
         await this.listen(port);
         this.port = port;
         return port;
-      } catch {
+      } catch (e) {
         // порт занят — следующий
+        last = e instanceof Error ? e.message : String(e);
       }
     }
-    throw new Error('Не удалось открыть порт');
+    // Причину показываем: по ней видно, сеть это, разрешения или что-то ещё.
+    throw new Error(`Не удалось открыть порт${last ? `: ${last}` : ''}`);
   }
 
   private listen(port: number): Promise<void> {
