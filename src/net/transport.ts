@@ -8,9 +8,12 @@ export interface NetSocket {
   destroy(): unknown;
   on(event: 'data', cb: (data: unknown) => void): unknown;
   on(event: 'close' | 'connect', cb: () => void): unknown;
-  on(event: 'error', cb: (e: Error) => void): unknown;
+  // react-native-tcp-socket передаёт в 'error' строку, Node — Error.
+  on(event: 'error', cb: (e: Error | string) => void): unknown;
   setNoDelay?(noDelay?: boolean): unknown;
   remoteAddress?: string;
+  /** Соединение ещё устанавливается (в react-native-tcp-socket запись в это время бросает ошибку). */
+  pending?: boolean;
 }
 
 export interface NetServer {
@@ -21,7 +24,8 @@ export interface NetServer {
 
 export interface NetModule {
   createServer(cb: (socket: NetSocket) => void): NetServer;
-  createConnection(options: { host: string; port: number }, cb?: () => void): NetSocket;
+  /** connectTimeout понимает react-native-tcp-socket; Node его игнорирует. */
+  createConnection(options: { host: string; port: number; connectTimeout?: number }, cb?: () => void): NetSocket;
 }
 
 export interface Timing {
@@ -40,6 +44,8 @@ export const DEFAULT_TIMING: Timing = {
 
 /** Сокет с разбором строк, пингом и таймаутом молчания. */
 export class Connection {
+  /** Почему закрылось: текст ошибки сокета или таймаут. */
+  error: string | null = null;
   private reader: LineReader;
   private lastSeen = Date.now();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -62,19 +68,27 @@ export class Connection {
       this.lastSeen = Date.now();
       this.reader.push(d);
     });
-    socket.on('error', () => this.close());
+    socket.on('error', (e) => {
+      this.error ??= (typeof e === 'string' ? e : e?.message) || 'ошибка сети';
+      this.close();
+    });
     socket.on('close', () => this.close());
     this.timer = setInterval(() => {
-      if (Date.now() - this.lastSeen > timing.timeoutMs) return this.close();
+      if (Date.now() - this.lastSeen > timing.timeoutMs) {
+        this.error ??= socket.pending ? 'хост не отвечает' : 'связь пропала';
+        return this.close();
+      }
       this.send({ type: 'ping', t: Date.now() });
     }, timing.pingIntervalMs);
   }
 
   send(msg: Message): void {
-    if (this.closed) return;
+    // Пока соединение устанавливается, писать нельзя: пинг подождёт, а hello уйдёт по 'connect'.
+    if (this.closed || this.socket.pending) return;
     try {
       this.socket.write(encode(msg));
-    } catch {
+    } catch (e) {
+      this.error ??= e instanceof Error ? e.message : 'ошибка записи';
       this.close();
     }
   }

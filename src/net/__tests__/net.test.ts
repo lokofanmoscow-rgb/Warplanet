@@ -1,13 +1,51 @@
+import { EventEmitter } from 'node:events';
 import net from 'node:net';
+import { CONFIG } from '../../engine';
 import { encode, LineReader, type Message } from '../protocol';
 import { GameHost } from '../host';
 import { GameClient } from '../client';
 import { probeHost, scanAddresses, subnetAddresses } from '../probe';
-import type { NetModule } from '../transport';
+import type { NetModule, NetSocket } from '../transport';
 import { DEFAULT_MAP_ID, getMap } from '../../maps';
 
 const netModule = net as unknown as NetModule;
 const timing = { pingIntervalMs: 50, timeoutMs: 400, reconnectWaitMs: 300, retryMs: 100 };
+
+/**
+ * Как react-native-tcp-socket на Android: подключение встаёт в очередь сетевого потока и идёт долго,
+ * а запись до 'connect' бросает «Socket is closed.».
+ */
+function slowNet(delayMs: number): NetModule {
+  return {
+    createServer: (cb) => netModule.createServer(cb),
+    createConnection(opts, cb) {
+      let real: net.Socket | null = null;
+      const s = Object.assign(new EventEmitter(), {
+        pending: true,
+        write(d: string) {
+          if (s.pending || !real) throw new Error('Socket is closed.');
+          return real.write(d);
+        },
+        destroy() {
+          clearTimeout(t);
+          if (real) real.destroy();
+          else s.emit('close');
+        },
+      });
+      const t = setTimeout(() => {
+        real = net.createConnection(opts, () => {
+          s.pending = false;
+          s.emit('connect');
+          cb?.();
+        });
+        real.on('data', (d) => s.emit('data', d));
+        real.on('error', (e) => s.emit('error', e.message));
+        real.on('close', () => s.emit('close'));
+      }, delayMs);
+      return s as unknown as NetSocket;
+    },
+  };
+}
 
 function waitFor(cond: () => boolean, ms = 3000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -65,7 +103,55 @@ describe('хост и клиент по TCP', () => {
     await scanAddresses(netModule, ['127.0.0.1'], host.port + 1, (h) => found.push(`пусто ${h}`), () => false);
     expect(found).toEqual(['127.0.0.1']);
     expect(subnetAddresses('192.168.1.7')).toHaveLength(253);
-    expect(subnetAddresses('192.168.1.7')[0]).toBe('192.168.1.1');
+    expect(new Set(subnetAddresses('192.168.1.7')).size).toBe(253);
+    // Сначала соседние адреса: хост обычно получил адрес рядом.
+    expect(subnetAddresses('192.168.1.7').slice(0, 3)).toEqual(['192.168.1.8', '192.168.1.6', '192.168.1.9']);
+  });
+
+  test('поиск перебором не забивает сетевой поток: не больше двух подключений сразу, у каждого таймаут', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const timeouts: (number | undefined)[] = [];
+    const fake: NetModule = {
+      createServer: netModule.createServer,
+      createConnection(opts) {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        timeouts.push(opts.connectTimeout);
+        let open = true;
+        const s = Object.assign(new EventEmitter(), {
+          write: () => true,
+          destroy() {
+            if (!open) return;
+            open = false;
+            active--;
+            s.emit('close');
+          },
+        });
+        // Адрес пуст: подключение падает по таймауту.
+        setTimeout(() => s.emit('error', 'timeout'), 5);
+        return s as unknown as NetSocket;
+      },
+    };
+    await scanAddresses(fake, subnetAddresses('10.0.0.50').slice(0, 20), 1, () => {}, () => false);
+    expect(timeouts).toHaveLength(20);
+    expect(maxActive).toBe(CONFIG.net.probeParallel);
+    expect(timeouts.every((t) => t === CONFIG.net.probeConnectMs)).toBe(true);
+  });
+
+  test('медленное подключение (как на Android) не обрывается пингом', async () => {
+    const c = new GameClient({
+      net: slowNet(timing.pingIntervalMs * 4),
+      host: '127.0.0.1',
+      port: host.port,
+      name: 'Борис',
+      clientId: 'slow',
+      timing,
+    });
+    clients.push(c);
+    c.connect();
+    await waitFor(() => c.status === 'connected' && c.lobby !== null);
+    expect(host.lobby.clientName).toBe('Борис');
   });
 
   test('лобби, старт и полная партия ходов', async () => {
@@ -160,9 +246,23 @@ describe('хост и клиент по TCP', () => {
     host2.stop();
   });
 
-  test('нет хоста — клиент сообщает об ошибке', async () => {
+  test('нет хоста — клиент сообщает об ошибке с причиной', async () => {
     const c = mk(1);
     await waitFor(() => c.status === 'closed');
-    expect(c.reason).toMatch(/подключиться/);
+    expect(c.reason).toMatch(/^Не удалось подключиться: .*ECONNREFUSED/);
+  });
+
+  test('приказы, ушедшие в оборванное соединение, отправляются снова', async () => {
+    const c = mk(host.port);
+    await waitFor(() => c.status === 'connected');
+    host.startGame(5);
+    await waitFor(() => c.game !== null);
+    (c as any).conn.socket.destroy();
+    c.sendOrders({ tax: 70, actions: [], moves: [] });
+    await waitFor(() => c.status === 'connected' && host.clientConnected);
+    await waitFor(() => host.readyFlags()[1] === true);
+    host.submitHostOrders({ tax: 50, actions: [], moves: [] });
+    await waitFor(() => c.game!.turn === 2);
+    expect(host.game!.players[1].tax).toBe(70);
   });
 });

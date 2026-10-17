@@ -2,7 +2,7 @@
   "expo": {
     "name": "WarPlanet",
     "slug": "warplanet",
-    "version": "0.3.2",
+    "version": "0.3.3",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.warplanet.game",
-      "versionCode": 9,
+      "versionCode": 10,
       "adaptiveIcon": {
         "backgroundColor": "#2B2118",
         "foregroundImage": "./assets/android-icon-foreground.png",

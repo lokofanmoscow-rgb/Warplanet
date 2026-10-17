@@ -1,3 +1,4 @@
+import { CONFIG } from '../engine';
 import { encode, LineReader, PROTOCOL_VERSION } from './protocol';
 import type { NetModule, NetSocket } from './transport';
 
@@ -12,7 +13,7 @@ export interface ProbeResult {
  * Есть ли по адресу хост WarPlanet: подключаемся, спрашиваем «кто тут» и ждём ответа не дольше timeoutMs.
  * Хост отвечает именем и закрывает соединение; до лобби такой опрос не доходит.
  */
-export function probeHost(net: NetModule, host: string, port: number, timeoutMs = 900): Promise<ProbeResult | null> {
+export function probeHost(net: NetModule, host: string, port: number, timeoutMs = 1500): Promise<ProbeResult | null> {
   return new Promise((resolve) => {
     let done = false;
     let socket: NetSocket | null = null;
@@ -32,7 +33,9 @@ export function probeHost(net: NetModule, host: string, port: number, timeoutMs 
       if (m.type === 'probe' && 'hostName' in m) finish({ hostName: m.hostName, sameVersion: m.v === PROTOCOL_VERSION, phase: m.phase });
     });
     try {
-      socket = net.createConnection({ host, port }, () => socket?.write(encode({ type: 'probe' })));
+      // Без connectTimeout подключение к пустому адресу висит секундами и держит сетевой поток.
+      const connectTimeout = Math.min(CONFIG.net.probeConnectMs, timeoutMs);
+      socket = net.createConnection({ host, port, connectTimeout }, () => socket?.write(encode({ type: 'probe' })));
       socket.on('data', (d) => reader.push(d));
       socket.on('error', () => finish(null));
       socket.on('close', () => finish(null));
@@ -42,29 +45,38 @@ export function probeHost(net: NetModule, host: string, port: number, timeoutMs 
   });
 }
 
-/** Адреса подсети /24 вокруг своего IP (кроме своего). */
+/** Адреса подсети /24 вокруг своего IP (кроме своего): сначала ближние — роутер раздаёт адреса подряд. */
 export function subnetAddresses(ip: string): string[] {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
   if (!m) return [];
   const base = `${m[1]}.${m[2]}.${m[3]}`;
-  return Array.from({ length: 254 }, (_, i) => `${base}.${i + 1}`).filter((a) => a !== ip);
+  const own = Number(m[4]);
+  const out: string[] = [];
+  for (let d = 1; d < 254; d++) {
+    for (const n of [own + d, own - d]) if (n >= 1 && n <= 254) out.push(`${base}.${n}`);
+  }
+  return out;
 }
 
-/** Перебор адресов пачками; найденные хосты отдаются сразу. stop() прерывает поиск. */
+/**
+ * Опрос адресов по нескольку сразу (CONFIG.net.probeParallel); найденные хосты отдаются сразу.
+ * shouldStop() прерывает поиск: после него новых подключений нет, идущие закончатся за probeConnectMs.
+ */
 export async function scanAddresses(
   net: NetModule,
   addresses: string[],
   port: number,
   onFound: (host: string, r: ProbeResult) => void,
   shouldStop: () => boolean,
-  batch = 32,
+  parallel: number = CONFIG.net.probeParallel,
 ): Promise<void> {
-  for (let i = 0; i < addresses.length && !shouldStop(); i += batch) {
-    await Promise.all(
-      addresses.slice(i, i + batch).map(async (a) => {
-        const r = await probeHost(net, a, port);
-        if (r && !shouldStop()) onFound(a, r);
-      }),
-    );
-  }
+  let next = 0;
+  const worker = async () => {
+    while (next < addresses.length && !shouldStop()) {
+      const a = addresses[next++];
+      const r = await probeHost(net, a, port);
+      if (r && !shouldStop()) onFound(a, r);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, parallel) }, worker));
 }

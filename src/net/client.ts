@@ -1,4 +1,4 @@
-import type { GameState, PlayerId, PlayerOrders } from '../engine';
+import { CONFIG, type GameState, type PlayerId, type PlayerOrders } from '../engine';
 import { PROTOCOL_VERSION, type HostMessage, type LobbyState, type Message } from './protocol';
 import { Connection, DEFAULT_TIMING, type NetModule, type Timing } from './transport';
 
@@ -27,6 +27,7 @@ export class GameClient {
   paused = false;
   /** Ход, приказы на который уже отправлены. */
   sentTurn: number | null = null;
+  private sentOrders: PlayerOrders | null = null;
 
   private conn: Connection | null = null;
   private start: number | null = null;
@@ -41,7 +42,8 @@ export class GameClient {
 
   connect(): void {
     this.stopped = false;
-    const socket = this.opts.net.createConnection({ host: this.opts.host, port: this.opts.port }, () => {
+    const { host, port } = this.opts;
+    const socket = this.opts.net.createConnection({ host, port, connectTimeout: CONFIG.net.connectTimeoutMs }, () => {
       this.send({ type: 'hello', v: PROTOCOL_VERSION, clientId: this.opts.clientId, name: this.opts.name, start: this.start });
     });
     const conn: Connection = new Connection(socket, this.timing, {
@@ -61,6 +63,7 @@ export class GameClient {
   sendOrders(orders: PlayerOrders): void {
     if (!this.game) return;
     this.sentTurn = this.game.turn;
+    this.sentOrders = orders;
     this.send({ type: 'orders', turn: this.game.turn, orders });
     this.changed();
   }
@@ -102,8 +105,12 @@ export class GameClient {
           this.game = m.game;
           this.ready = m.ready;
           this.paused = m.paused;
-          // Хост знает, что мы уже готовы (например, после переподключения).
-          if (this.slot !== null && m.ready[this.slot] && !m.game.finished) this.sentTurn = m.game.turn;
+          if (this.slot !== null && !m.game.finished) {
+            // Хост знает, что мы уже готовы (например, после переподключения).
+            if (m.ready[this.slot]) this.sentTurn = m.game.turn;
+            // Приказы ушли в оборвавшееся соединение — отправляем ещё раз, иначе ход встанет.
+            else if (this.sentTurn === m.game.turn && this.sentOrders) this.send({ type: 'orders', turn: m.game.turn, orders: this.sentOrders });
+          }
         }
         break;
       case 'game_over':
@@ -118,7 +125,9 @@ export class GameClient {
     this.conn = null;
     if (this.stopped || !this.everConnected) {
       if (this.status !== 'rejected') this.status = 'closed';
-      if (!this.everConnected && !this.reason) this.reason = 'Не удалось подключиться';
+      if (!this.everConnected && !this.reason) {
+        this.reason = `Не удалось подключиться${conn.error ? `: ${conn.error.slice(0, 160)}` : ''}`;
+      }
       this.changed();
       return;
     }
