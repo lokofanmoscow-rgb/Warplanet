@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { CONFIG } from '../engine';
-import { networkAvailable } from './platform';
+import { getLocalIp, getNet, networkAvailable } from './platform';
+import { scanAddresses, subnetAddresses } from './probe';
 
 // Обнаружение: хост объявляет себя через mDNS/NSD как _conquest._tcp, клиент видит список игр.
 // MulticastLock на время поиска берёт сама библиотека react-native-zeroconf.
+// Многие роутеры глушат mDNS, поэтому параллельно идёт запасной поиск: опрос всех адресов
+// своей Wi-Fi подсети на порту игры.
 
 type ZeroconfType = import('react-native-zeroconf').default;
 
@@ -55,6 +58,60 @@ export function useGameScan(enabled: boolean): { hosts: FoundHost[]; scanning: b
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zcRef = useRef<ZeroconfType | null>(null);
+  const [mdnsHosts, setMdnsHosts] = useState<FoundHost[]>([]);
+  const [probed, setProbed] = useState<FoundHost[]>([]);
+
+  // Общий список: найденное через mDNS и перебором, без повторов одного адреса.
+  useEffect(() => {
+    const seen = new Set<string>();
+    setHosts(
+      [...mdnsHosts, ...probed].filter((h) => {
+        const k = `${h.host}:${h.port}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      }),
+    );
+  }, [mdnsHosts, probed]);
+
+  // Запасной поиск перебором адресов подсети.
+  useEffect(() => {
+    if (!enabled || !networkAvailable) return;
+    let stopped = false;
+    let running = false;
+    const port = CONFIG.net.port;
+    const run = async () => {
+      if (running) return;
+      running = true;
+      const found: FoundHost[] = [];
+      try {
+        const ip = await getLocalIp();
+        if (!ip || stopped) return;
+        await scanAddresses(
+          getNet(),
+          subnetAddresses(ip),
+          port,
+          (host, r) => {
+            const h = { key: `ip:${host}`, name: r.sameVersion ? r.hostName : `${r.hostName} (другая версия игры)`, host, port };
+            found.push(h);
+            setProbed((list) => [...list.filter((x) => x.host !== host), h]);
+          },
+          () => stopped,
+        );
+        // Пропавшие за проход хосты убираем.
+        if (!stopped) setProbed(found);
+      } finally {
+        running = false;
+      }
+    };
+    // Повторяем раз в 15 секунд: хост мог появиться позже.
+    void run();
+    const id = setInterval(() => void run(), 15000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [enabled]);
 
   useEffect(() => {
     const zc = zeroconf();
@@ -69,7 +126,7 @@ export function useGameScan(enabled: boolean): { hosts: FoundHost[]; scanning: b
           host: s.ipv4?.[0] ?? s.addresses[0],
           port: s.port,
         }));
-      setHosts(list);
+      setMdnsHosts(list);
     };
     const subs = [
       zc.subscribe('resolved', refresh),

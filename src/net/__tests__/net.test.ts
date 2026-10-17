@@ -2,6 +2,7 @@ import net from 'node:net';
 import { encode, LineReader, type Message } from '../protocol';
 import { GameHost } from '../host';
 import { GameClient } from '../client';
+import { probeHost, scanAddresses, subnetAddresses } from '../probe';
 import type { NetModule } from '../transport';
 import { DEFAULT_MAP_ID, getMap } from '../../maps';
 
@@ -51,6 +52,20 @@ describe('хост и клиент по TCP', () => {
   afterEach(() => {
     clients.splice(0).forEach((c) => c.close());
     host.stop();
+  });
+
+  test('поиск перебором: хост отвечает на опрос именем, лобби не трогается', async () => {
+    const r = await probeHost(netModule, '127.0.0.1', host.port, 2000);
+    expect(r).toEqual({ hostName: 'Анна', sameVersion: true, phase: 'lobby' });
+    expect(host.lobby.clientConnected).toBe(false);
+    // Пустой порт — ничего.
+    expect(await probeHost(netModule, '127.0.0.1', host.port + 1, 500)).toBeNull();
+    const found: string[] = [];
+    await scanAddresses(netModule, ['127.0.0.1'], host.port, (h) => found.push(h), () => false);
+    await scanAddresses(netModule, ['127.0.0.1'], host.port + 1, (h) => found.push(`пусто ${h}`), () => false);
+    expect(found).toEqual(['127.0.0.1']);
+    expect(subnetAddresses('192.168.1.7')).toHaveLength(253);
+    expect(subnetAddresses('192.168.1.7')[0]).toBe('192.168.1.1');
   });
 
   test('лобби, старт и полная партия ходов', async () => {

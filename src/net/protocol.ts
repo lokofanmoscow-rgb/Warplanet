@@ -1,7 +1,7 @@
 import { CONFIG, type Difficulty, type GameState, type PlayerId, type PlayerOrders, type VictoryType } from '../engine';
 
 // Транспорт: TCP-сокет, сообщения в JSON, одно на строку.
-// Типы сообщений: hello, orders, state, ping, game_over.
+// Типы сообщений: hello, orders, state, ping, game_over; probe — короткий опрос «кто тут» при поиске игры.
 
 export const PROTOCOL_VERSION = CONFIG.net.protocolVersion;
 
@@ -30,12 +30,14 @@ export type HostMessage =
   | { type: 'state'; phase: 'lobby'; lobby: LobbyState }
   | { type: 'state'; phase: 'game'; game: GameState; ready: boolean[]; paused: boolean }
   | { type: 'ping'; t: number; reply?: boolean }
-  | { type: 'game_over'; game: GameState };
+  | { type: 'game_over'; game: GameState }
+  | { type: 'probe'; v: number; hostName: string; phase: 'lobby' | 'game' };
 
 export type ClientMessage =
   | { type: 'hello'; v: number; clientId: string; name: string; start?: number | null }
   | { type: 'orders'; turn: number; orders: PlayerOrders }
-  | { type: 'ping'; t: number; reply?: boolean };
+  | { type: 'ping'; t: number; reply?: boolean }
+  | { type: 'probe' };
 
 export type Message = HostMessage | ClientMessage;
 

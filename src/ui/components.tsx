@@ -278,7 +278,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 8,
   },
+  // Внутренняя часть заполняет панель: если панель растянута (лобби), содержимое с flex: 1
+  // получает её высоту, а не нулевую (на Android оно иначе обрезалось и не было видно).
   panelInner: {
+    flexGrow: 1,
     flexShrink: 1,
     overflow: 'hidden',
     backgroundColor: COLORS.panel,

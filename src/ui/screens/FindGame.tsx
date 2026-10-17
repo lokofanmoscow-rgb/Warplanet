@@ -79,7 +79,9 @@ export function FindGame() {
             {hosts.length === 0 ? (
               <Row>
                 {scanning || !error ? <ActivityIndicator color={COLORS.gold} /> : null}
-                <T dim>{error ? `Поиск недоступен: ${error}` : 'Ищем игры…'}</T>
+                <T dim style={{ flexShrink: 1 }}>
+                  {error ? `Ищем перебором адресов сети (mDNS недоступен: ${error})…` : 'Ищем игры в вашей Wi-Fi сети…'}
+                </T>
               </Row>
             ) : (
               <View style={{ gap: 8 * s }}>

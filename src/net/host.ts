@@ -202,6 +202,12 @@ export class GameHost {
 
   private onMessage(conn: Connection, raw: Message): void {
     const m = raw as ClientMessage;
+    if (m.type === 'probe') {
+      // Поиск игры перебором адресов: отвечаем, кто мы, и закрываем соединение.
+      conn.send({ type: 'probe', v: PROTOCOL_VERSION, hostName: this.lobby.hostName, phase: this.phase });
+      setTimeout(() => conn.close(), 100);
+      return;
+    }
     if (m.type === 'hello') return this.onHello(conn, m);
     if (conn !== this.conn) return;
     if (m.type === 'orders' && this.game && m.turn === this.game.turn && !this.game.finished) {
