@@ -66,7 +66,7 @@ export function MainMenu() {
   return (
     <View style={styles.fill}>
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
-        <MapView map={map} game={demo} plates={[]} interactive={false} drift />
+        <MapView map={map} game={demo} units={[]} interactive={false} drift />
       </View>
       <View style={[StyleSheet.absoluteFill, styles.dim]} pointerEvents="none" />
       <ScrollView

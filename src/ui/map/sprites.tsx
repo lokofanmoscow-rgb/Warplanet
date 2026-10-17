@@ -8,7 +8,6 @@ import {
   Path,
   RadialGradient,
   Rect,
-  RoundedRect,
   Skia,
   useImage,
   vec,
@@ -26,8 +25,6 @@ export type SpriteName =
   | 'city_large'
   | 'capital'
   | 'fort'
-  | 'army'
-  | 'ship'
   | `decor_${number}`;
 
 export type SpriteImages = Partial<Record<string, SkImage | null>>;
@@ -207,38 +204,6 @@ export function Fort({ x, y, s, images }: { x: number; y: number; s: number; ima
   );
 }
 
-/** Значок армии на плашке: шлем в цвете игрока; в море — корабль. */
-export function ArmyIcon({ x, y, s, color, sea, images }: { x: number; y: number; s: number; color: string; sea: boolean; images: SpriteImages }) {
-  const img = sea ? images.ship : images.army;
-  if (img) return <Img image={img} x={x} y={y + 6 * s} size={14 * s} tint={color} />;
-  const sw = Math.max(0.4, 0.6 * s);
-  if (sea) {
-    const hull = poly([x - 6 * s, y + 1 * s, x + 6 * s, y + 1 * s, x + 4 * s, y + 4 * s, x - 4 * s, y + 4 * s]);
-    const sail = poly([x - 0.5 * s, y - 6 * s, x + 4.5 * s, y + 0.2 * s, x - 0.5 * s, y + 0.2 * s]);
-    return (
-      <Group>
-        <Path path={sail} color="#F5EBD7" />
-        <Path path={sail} color={OUTLINE} style="stroke" strokeWidth={sw} />
-        <Rect x={x - 3.8 * s} y={y - 3 * s} width={2.6 * s} height={3.2 * s} color={color} />
-        <Path path={hull} color="#7A4E2D" />
-        <Path path={hull} color={OUTLINE} style="stroke" strokeWidth={sw} />
-      </Group>
-    );
-  }
-  const helm = build((b) => {
-    b.addArc({ x: x - 4.5 * s, y: y - 4.5 * s, width: 9 * s, height: 9 * s }, 180, 180);
-    b.close();
-  });
-  return (
-    <Group>
-      <Path path={helm} color={color} />
-      <Rect x={x - 5.5 * s} y={y - 0.6 * s} width={11 * s} height={2 * s} color={shade(color, -0.35)} />
-      <Path path={helm} color={OUTLINE} style="stroke" strokeWidth={sw} />
-      <Circle cx={x} cy={y - 5.2 * s} r={1.2 * s} color={COLORS.gold} />
-    </Group>
-  );
-}
-
 /** Флаг для режима «Захват флага». */
 export function FlagMarker({ x, y, s, color }: { x: number; y: number; s: number; color: string }) {
   const flag = poly([x, y - 26 * s, x + 14 * s, y - 22 * s, x, y - 17 * s]);
@@ -336,40 +301,4 @@ export function Decor({ kind, x, y, s, images }: { kind: number; x: number; y: n
       );
     }
   }
-}
-
-/** Плашка численности под число солдат. */
-export function Plate({
-  x,
-  y,
-  s,
-  width,
-  color,
-  dim,
-}: {
-  x: number;
-  y: number;
-  s: number;
-  width: number;
-  color: string | null;
-  dim?: boolean;
-}) {
-  const h = 13 * s;
-  return (
-    <Group opacity={dim ? 0.85 : 1}>
-      <RoundedRect x={x - width / 2 + 1 * s} y={y - h / 2 + 1.4 * s} width={width} height={h} r={3 * s} color="rgba(0,0,0,0.3)" />
-      <RoundedRect x={x - width / 2} y={y - h / 2} width={width} height={h} r={3 * s} color={color ? COLORS.panel : '#5B5145'} />
-      {color && <RoundedRect x={x - width / 2} y={y - h / 2} width={width} height={2.6 * s} r={1.3 * s} color={color} />}
-      <RoundedRect
-        x={x - width / 2}
-        y={y - h / 2}
-        width={width}
-        height={h}
-        r={3 * s}
-        color={color ? COLORS.gold : '#9C8F7C'}
-        style="stroke"
-        strokeWidth={0.9 * s}
-      />
-    </Group>
-  );
 }

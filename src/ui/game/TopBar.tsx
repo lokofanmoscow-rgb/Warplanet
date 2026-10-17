@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { happinessTarget, type GameState, type PlanResult, type PlayerId } from '../../engine';
 import { T } from '../components';
+import { fmtAp } from '../describe';
 import { Icon, type IconName } from '../icons';
 import { COLORS, FONTS, useLayout } from '../theme';
 
@@ -99,7 +100,8 @@ export function TopBar({
 }) {
   const { s } = useLayout();
   const p = game.players[player];
-  const own = game.cells.filter((c) => c.owner === player && c.pop > 0);
+  // Счастье — по прогнозу: объявление войны и праздники видны сразу.
+  const own = plan.projected.cells.filter((c) => c.owner === player && c.pop > 0);
   const happy = own.length ? own.reduce((sum, c) => sum + c.happiness, 0) / own.length : 0;
   const net = plan.economy.income - plan.economy.upkeep;
   // Золото на этот ход: казна + доход − армия, минус то, что уже отдано на приказы (как и ОД).
@@ -121,7 +123,7 @@ export function TopBar({
       <Stat icon="gold" label={`Золото: доступно ${plan.goldLeft}`} value={`${plan.goldLeft}`} sub={goldSub}>
         <GoldDelta gold={plan.goldLeft} owner={`${game.turn}|${player}`} />
       </Stat>
-      <Stat icon="ap" label="Очки действия" value={`${plan.apLeft}/${plan.apTotal}`} sub="ОД" />
+      <Stat icon="ap" label="Очки действия" value={`${fmtAp(plan.apLeft)}/${plan.apTotal}`} sub="ОД" />
       <Stat icon="tax" label="Налог" value={`${tax}%`} sub="налог ›" onPress={onTax} />
       <Stat icon="happiness" label="Счастье" value={`${Math.round(happy)}%`} sub={`цель ${Math.round(happinessTarget(tax))}%`} />
       <Stat icon="turn" label="Ход" value={`${game.turn}`} sub={limit > 0 ? `из ${limit}` : 'ход'} />

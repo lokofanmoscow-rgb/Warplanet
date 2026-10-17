@@ -15,6 +15,11 @@ export function fmt(n: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+/** ОД бывают дробными: 4.5. */
+export function fmtAp(n: number): string {
+  return Number.isInteger(n) ? `${n}` : n.toFixed(1);
+}
+
 export const END_REASON: Record<EndReason, string> = {
   superiority: 'превосходство',
   domination: 'доминирование',
@@ -63,6 +68,16 @@ export function describeLog(game: GameState, map: MapDef, viewer: PlayerId | nul
         break;
       case 'loot':
         if (mine(e.player)) lines.push({ text: `Мародёрство — ${cell(e.cell)}: +${e.gold} зол.`, player: e.player, kind: 'info' });
+        break;
+      case 'festival':
+        if (mine(e.player)) lines.push({ text: `Праздник — ${cell(e.cell)}: счастье +${CONFIG.actions.festival.happiness}%`, player: e.player, kind: 'info' });
+        break;
+      case 'war':
+        lines.push({
+          text: `Война: ${name(e.player)} объявляет войну стране «${name(e.target)}»`,
+          player: e.player,
+          kind: mine(e.target) ? 'bad' : 'info',
+        });
         break;
       case 'battle': {
         const where = e.border ? `Встречный бой — ${cell(e.from!)} / ${cell(e.cell)}` : `Бой — ${cell(e.cell)}`;

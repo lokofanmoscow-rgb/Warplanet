@@ -9,10 +9,11 @@ import {
   type CellId,
   type GameState,
   type MapDef,
+  type MoveKind,
   type PlayerId,
 } from '../../engine';
 import { Button, Panel, Row, Stepper, Swatch, T, Title } from '../components';
-import { describeLog } from '../describe';
+import { describeLog, fmtAp, plural } from '../describe';
 import { COLORS, useLayout } from '../theme';
 
 export function Overlay({ children, onDismiss, maxWidth = 460 }: { children: React.ReactNode; onDismiss?: () => void; maxWidth?: number }) {
@@ -26,46 +27,87 @@ export function Overlay({ children, onDismiss, maxWidth = 460 }: { children: Rea
   );
 }
 
-/** Выбор числа солдат для приказа на движение. */
+const MOVE_TITLE: Record<MoveKind, string> = {
+  march: 'Переход',
+  embark: 'Посадка на корабли',
+  sail: 'Плавание флота',
+  land: 'Высадка',
+  attack: 'Атака',
+  naval: 'Морской бой',
+};
+
+/** Выбор числа солдат для приказа на перемещение. */
 export function MoveDialog({
   map,
   from,
   to,
+  kind,
+  steps,
   available,
+  goldLeft,
   onConfirm,
   onCancel,
 }: {
   map: MapDef;
   from: CellId;
   to: CellId;
+  kind: MoveKind;
+  steps: number;
   available: number;
+  goldLeft: number;
   onConfirm: (count: number) => void;
   onCancel: () => void;
 }) {
   const { s } = useLayout();
-  const [count, setCount] = useState(available);
-  const sea = map.cells[to].kind === 'sea';
+  const M = CONFIG.move;
+  const embark = kind === 'embark' || (kind === 'naval' && map.cells[from].kind === 'land');
+  // На корабли — сколько хватает золота.
+  const max = embark ? Math.min(available, Math.floor(goldLeft / M.embarkGoldPerSoldier)) : available;
+  const [count, setCount] = useState(Math.max(1, max));
+  const cost = [`${fmtAp(M.ap)} ОД`, embark ? `${count * M.embarkGoldPerSoldier} зол.` : null].filter(Boolean).join(' · ');
+  const note: Record<MoveKind, string> = {
+    march: `По своей земле: ${steps} ${plural(steps, 'клетка', 'клетки', 'клеток')}. Армия сразу будет на месте.`,
+    embark: `${M.embarkGoldPerSoldier} зол. за солдата. В море сила ×0,5, содержание вдвое дороже; флот ходит до ${M.seaRange} клеток.`,
+    sail: `По морю: ${steps} ${plural(steps, 'клетка', 'клетки', 'клеток')}.`,
+    land: 'Армия сходит на берег в своей провинции.',
+    attack: 'Армия встанет у границы, бой будет после «Готово». Ничья — в пользу защиты.',
+    naval: 'Бой с вражеским флотом после «Готово». В море сила ×0,5.',
+  };
   return (
     <Overlay onDismiss={onCancel}>
-      <Title size={20}>Приказ на движение</Title>
+      <Title size={20}>{MOVE_TITLE[kind]}</Title>
       <T dim size={14} style={{ marginTop: 4 * s }}>
         {map.cells[from].name} → {map.cells[to].name}
       </T>
-      {sea && (
-        <T dim size={12} style={{ marginTop: 4 * s }}>
-          В море армия плывёт на кораблях: сила ×0,5, содержание вдвое дороже.
+      <T dim size={12} style={{ marginTop: 4 * s }}>
+        {note[kind]}
+      </T>
+      <T size={13} style={{ marginTop: 6 * s, color: COLORS.goldLight }}>
+        Цена: {cost}
+      </T>
+      {max <= 0 ? (
+        <T size={14} style={{ marginVertical: 16 * s, textAlign: 'center', color: COLORS.danger }}>
+          Не хватает золота на корабли
         </T>
+      ) : (
+        <View style={{ alignItems: 'center', marginVertical: 16 * s, gap: 10 * s }}>
+          <Stepper value={count} min={1} max={max} big={10} onChange={setCount} />
+          <Row gap={8}>
+            <Button small label="Половина" onPress={() => setCount(Math.max(1, Math.floor(max / 2)))} />
+            <Button small label={`Все (${max})`} onPress={() => setCount(max)} />
+          </Row>
+        </View>
       )}
-      <View style={{ alignItems: 'center', marginVertical: 16 * s, gap: 10 * s }}>
-        <Stepper value={count} min={1} max={available} big={10} onChange={setCount} />
-        <Row gap={8}>
-          <Button small label="Половина" onPress={() => setCount(Math.max(1, Math.floor(available / 2)))} />
-          <Button small label={`Все (${available})`} onPress={() => setCount(available)} />
-        </Row>
-      </View>
       <Row gap={10}>
         <Button label="Отмена" onPress={onCancel} style={{ flex: 1 }} />
-        <Button label="Отправить" variant="primary" icon="move" onPress={() => onConfirm(count)} style={{ flex: 1 }} />
+        <Button
+          label="Отправить"
+          variant="primary"
+          icon="move"
+          disabled={max <= 0}
+          onPress={() => onConfirm(Math.min(count, max))}
+          style={{ flex: 1 }}
+        />
       </Row>
     </Overlay>
   );

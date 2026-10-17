@@ -16,7 +16,7 @@ import { saveGame, type SavedMode } from './storage';
 
 export type Mode = 'ai' | 'hotseat' | 'host' | 'client';
 
-type Edit = { kind: 'action' } | { kind: 'move' };
+type Edit = { kind: 'action' } | { kind: 'move' } | { kind: 'war' };
 
 /**
  * Партия на этом устройстве в любом режиме. Интерфейс видит одно и то же:
@@ -115,7 +115,7 @@ export class MatchController {
   orders(id: PlayerId = this.active): PlayerOrders {
     let d = this.drafts.get(id);
     if (!d) {
-      d = { tax: this.game.players[id]?.tax ?? 0, actions: [], moves: [] };
+      d = { tax: this.game.players[id]?.tax ?? 0, actions: [], moves: [], wars: [] };
       this.drafts.set(id, d);
     }
     return d;
@@ -136,12 +136,23 @@ export class MatchController {
     this.emit();
   }
 
+  /**
+   * Пробует черновик с изменением: ошибка самого изменения или уже отданных перемещений
+   * (действия выполняются раньше перемещений и могут забрать нужные им ОД и золото).
+   */
+  private trial(next: PlayerOrders, own: (plan: PlanResult) => string | null): string | null {
+    const plan = simulatePlan(this.game, this.active, next);
+    const err = own(plan);
+    if (err) return err;
+    const broken = plan.moveErrors.find((e) => e !== null);
+    return broken ? `Тогда не выйдут перемещения: ${broken.toLowerCase()}` : null;
+  }
+
   /** Добавляет действие; возвращает текст ошибки, если оно невозможно. */
   addAction(action: Action): string | null {
     if (!this.canEdit()) return 'Приказы уже отданы';
     const o = this.orders();
-    const trial = { ...o, actions: [...o.actions, action] };
-    const err = simulatePlan(this.game, this.active, trial).actionErrors.at(-1) ?? null;
+    const err = this.trial({ ...o, actions: [...o.actions, action] }, (p) => p.actionErrors.at(-1) ?? null);
     if (err) return err;
     o.actions.push(action);
     this.edits.push({ kind: 'action' });
@@ -153,18 +164,19 @@ export class MatchController {
     if (!this.canEdit()) return;
     this.orders().actions.splice(index, 1);
     this.dropEdit('action');
+    this.prune();
     this.emit();
   }
 
-  /** Приказ на движение. Повторный приказ по той же границе складывается. */
+  /** Приказ на перемещение. Повторный приказ туда же складывается и ОД не тратит. Возвращает ошибку. */
   addMove(move: Move): string | null {
     if (!this.canEdit()) return 'Приказы уже отданы';
     const o = this.orders();
-    const trial = { ...o, moves: [...o.moves, move] };
-    const err = simulatePlan(this.game, this.active, trial).moveErrors.at(-1) ?? null;
+    const idx = o.moves.findIndex((m) => m.from === move.from && m.to === move.to);
+    const moves = idx >= 0 ? o.moves.map((m, i) => (i === idx ? { ...m, count: m.count + move.count } : m)) : [...o.moves, move];
+    const err = this.trial({ ...o, moves }, (p) => p.moveErrors[idx >= 0 ? idx : moves.length - 1]);
     if (err) return err;
-    const same = o.moves.find((m) => m.from === move.from && m.to === move.to);
-    if (same) same.count += move.count;
+    if (idx >= 0) o.moves[idx].count += move.count;
     else {
       o.moves.push(move);
       this.edits.push({ kind: 'move' });
@@ -177,7 +189,41 @@ export class MatchController {
     if (!this.canEdit()) return;
     this.orders().moves.splice(index, 1);
     this.dropEdit('move');
+    this.prune();
     this.emit();
+  }
+
+  /** Объявление войны стране target (действует сразу, можно в том же ходу атаковать). */
+  declareWar(target: PlayerId): string | null {
+    if (!this.canEdit()) return 'Приказы уже отданы';
+    const o = this.orders();
+    const wars = [...(o.wars ?? []), target];
+    const err = this.trial({ ...o, wars }, (p) => p.warErrors.at(-1) ?? null);
+    if (err) return err;
+    o.wars = wars;
+    this.edits.push({ kind: 'war' });
+    this.emit();
+    return null;
+  }
+
+  cancelWar(target: PlayerId): void {
+    if (!this.canEdit()) return;
+    const o = this.orders();
+    o.wars = (o.wars ?? []).filter((t) => t !== target);
+    this.dropEdit('war');
+    this.prune();
+    this.emit();
+  }
+
+  /** После отмены приказа убираем те, что без него стали невозможны (например, атаку без войны). */
+  private prune(): void {
+    const o = this.orders();
+    for (let i = 0; i < 4; i++) {
+      const plan = simulatePlan(this.game, this.active, o);
+      if (plan.actionErrors.every((e) => e === null) && plan.moveErrors.every((e) => e === null)) return;
+      o.actions = o.actions.filter((_, j) => plan.actionErrors[j] === null);
+      o.moves = o.moves.filter((_, j) => plan.moveErrors[j] === null);
+    }
   }
 
   /** «Отменить последний». */
@@ -187,14 +233,17 @@ export class MatchController {
     const last = this.edits.pop();
     if (last?.kind === 'move') o.moves.pop();
     else if (last?.kind === 'action') o.actions.pop();
+    else if (last?.kind === 'war') o.wars?.pop();
     else if (o.moves.length) o.moves.pop();
-    else o.actions.pop();
+    else if (o.actions.length) o.actions.pop();
+    else o.wars?.pop();
+    this.prune();
     this.emit();
   }
 
   get canUndo(): boolean {
     const o = this.orders();
-    return this.canEdit() && (o.moves.length > 0 || o.actions.length > 0);
+    return this.canEdit() && (o.moves.length > 0 || o.actions.length > 0 || (o.wars?.length ?? 0) > 0);
   }
 
   private dropEdit(kind: Edit['kind']): void {

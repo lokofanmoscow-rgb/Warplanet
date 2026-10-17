@@ -2,14 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   BlurMask,
   DashPathEffect,
-  drawAsImage,
   FractalNoise,
   Group,
   Image,
   ImageShader,
   Path,
   Rect,
-  RoundedRect,
   Shader,
   Skia,
   Text,
@@ -18,9 +16,10 @@ import {
   type SkImage,
 } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
-import type { CellId, CellState, GameState, MapDef, Move, PlayerId } from '../../engine';
+import type { CellId, CellState, GameState, PlayerId } from '../../engine';
 import { COLORS, shade, withAlpha } from '../theme';
 import { decorFor } from './decor';
+import { renderImage } from './offscreen';
 import { neutralArea, stateBorders, territory, type MapGeometry } from './geometry';
 import { Capital, City, citySizeFor, Decor, FlagMarker, Fort, type SpriteImages } from './sprites';
 
@@ -64,7 +63,7 @@ export function SeaLayer({ geo }: { geo: MapGeometry }) {
   useEffect(() => {
     if (image) return;
     let alive = true;
-    drawAsImage(<SeaElements geo={geo} />, { width: geo.map.width, height: geo.map.height })
+    renderImage(<SeaElements geo={geo} />, { width: geo.map.width, height: geo.map.height })
       .then((img) => {
         if (!img || !alive) return;
         seaCache.set(geo.map.id, img);
@@ -88,7 +87,7 @@ export function useNoiseTile(): SkImage | null {
   const [tile, setTile] = useState<SkImage | null>(noiseTile);
   useEffect(() => {
     if (tile) return;
-    noisePromise ??= drawAsImage(
+    noisePromise ??= renderImage(
       <Rect x={0} y={0} width={256} height={256}>
         <FractalNoise freqX={0.09} freqY={0.09} octaves={3} tileWidth={256} tileHeight={256} />
       </Rect>,
@@ -280,93 +279,6 @@ export const LabelLayer = React.memo(function LabelLayer({ geo, font, k }: { geo
 
 // ---------- Плашки численности ----------
 
-export interface PlateInfo {
-  cell: CellId;
-  owner: PlayerId | null;
-  troops: number;
-  /** Сколько уходит по приказам (для своих армий). */
-  outgoing: number;
-  /** Нанято в этом ходу. */
-  recruited: number;
-}
-
-export function plateAnchor(map: MapDef, cell: CellId): [number, number] {
-  const c = map.cells[cell];
-  return c.kind === 'sea' ? c.center : [c.center[0], c.center[1] - 26];
-}
-
-/** Плашки численности: рамка в цвете владельца и число — минимум команд рисования на плашку. */
-export const PlateLayer = React.memo(function PlateLayer({
-  geo,
-  game,
-  plates,
-  font,
-  k,
-}: {
-  geo: MapGeometry;
-  game: GameState;
-  plates: PlateInfo[];
-  font: SkFont | null;
-  k: number;
-}) {
-  if (!font) return null;
-  const size = font.getSize();
-  const h = 15 * k;
-  return (
-    <Group>
-      {plates.map((p) => {
-        const [x, y] = plateAnchor(geo.map, p.cell);
-        const left = p.troops - p.outgoing;
-        if (left <= 0) return null;
-        const label = p.recruited > 0 ? `${left}+` : `${left}`;
-        const sea = geo.map.cells[p.cell].kind === 'sea';
-        const tw = font.measureText(label).width;
-        const width = (tw + (sea ? 18 : 10)) * k;
-        const color = p.owner !== null ? game.players[p.owner].color : null;
-        const x0 = x - width / 2;
-        return (
-          <Group key={p.cell}>
-            <RoundedRect x={x0} y={y - h / 2} width={width} height={h} r={3.5 * k} color={color ? COLORS.panel : '#5B5145'} />
-            <RoundedRect
-              x={x0}
-              y={y - h / 2}
-              width={width}
-              height={h}
-              r={3.5 * k}
-              color={color ?? '#A39885'}
-              style="stroke"
-              strokeWidth={2 * k}
-            />
-            {sea && color ? <ShipGlyph x={x0 + 7.5 * k} y={y} k={k} color={color} /> : null}
-            <Group transform={[{ translateX: x0 + (sea ? 13 : 5) * k }, { translateY: y + size * 0.36 * k }, { scale: k }]}>
-              <Text x={0} y={0} text={label} font={font} color={color ? COLORS.text : '#EDE3CF'} />
-            </Group>
-          </Group>
-        );
-      })}
-    </Group>
-  );
-});
-
-function ShipGlyph({ x, y, k, color }: { x: number; y: number; k: number; color: string }) {
-  const path = useMemo(
-    () =>
-      Skia.PathBuilder.Make()
-        .moveTo(x - 4.5 * k, y + 0.5 * k)
-        .lineTo(x + 4.5 * k, y + 0.5 * k)
-        .lineTo(x + 3 * k, y + 3.5 * k)
-        .lineTo(x - 3 * k, y + 3.5 * k)
-        .close()
-        .moveTo(x - 0.5 * k, y - 5 * k)
-        .lineTo(x + 3.5 * k, y - 0.3 * k)
-        .lineTo(x - 0.5 * k, y - 0.3 * k)
-        .close()
-        .build(),
-    [x, y, k],
-  );
-  return <Path path={path} color={color} />;
-}
-
 // ---------- Стрелки приказов ----------
 
 function arrowPath(x1: number, y1: number, x2: number, y2: number, bend: number, head: number) {
@@ -397,41 +309,27 @@ function arrowPath(x1: number, y1: number, x2: number, y2: number, bend: number,
   return { body, headPath, mid: [(x1 + 2 * cx + ex) / 4, (y1 + 2 * cy + ey) / 4] as [number, number] };
 }
 
-export const ArrowLayer = React.memo(function ArrowLayer({
-  geo,
-  moves,
-  color,
-  font,
-  k,
-}: {
-  geo: MapGeometry;
-  moves: Move[];
+export interface ArrowInfo {
+  key: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
   color: string;
-  font: SkFont | null;
-  k: number;
-}) {
+}
+
+/** Стрелки атак: от отряда на границе к цели. */
+export const ArrowLayer = React.memo(function ArrowLayer({ arrows, k }: { arrows: ArrowInfo[]; k: number }) {
   return (
     <Group>
-      {moves.map((m, i) => {
-        const [x1, y1] = plateAnchor(geo.map, m.from);
-        const [x2, y2] = geo.map.cells[m.to].center;
-        const a = arrowPath(x1, y1, x2, y2, 0.18, 11 * k);
-        const label = `${m.count}`;
-        const tw = font ? font.measureText(label).width * k * 0.85 : 0;
+      {arrows.map((a) => {
+        const p = arrowPath(a.x1, a.y1, a.x2, a.y2, 0.12, 10 * k);
         return (
-          <Group key={i}>
-            <Path path={a.body} color="rgba(30,20,12,0.55)" style="stroke" strokeWidth={7 * k} strokeCap="round" />
-            <Path path={a.headPath} color="rgba(30,20,12,0.55)" style="stroke" strokeWidth={3 * k} strokeJoin="round" />
-            <Path path={a.body} color={color} style="stroke" strokeWidth={4.2 * k} strokeCap="round" />
-            <Path path={a.headPath} color={color} />
-            {font && (
-              <Group>
-                <Rect x={a.mid[0] - tw / 2 - 3 * k} y={a.mid[1] - 7 * k} width={tw + 6 * k} height={12 * k} color="rgba(43,33,24,0.85)" />
-                <Group transform={[{ translateX: a.mid[0] - tw / 2 }, { translateY: a.mid[1] + 3.2 * k }, { scale: k * 0.85 }]}>
-                  <Text x={0} y={0} text={label} font={font} color={COLORS.text} />
-                </Group>
-              </Group>
-            )}
+          <Group key={a.key}>
+            <Path path={p.body} color="rgba(30,20,12,0.55)" style="stroke" strokeWidth={7 * k} strokeCap="round" />
+            <Path path={p.headPath} color="rgba(30,20,12,0.55)" style="stroke" strokeWidth={3 * k} strokeJoin="round" />
+            <Path path={p.body} color={a.color} style="stroke" strokeWidth={4.2 * k} strokeCap="round" />
+            <Path path={p.headPath} color={a.color} />
           </Group>
         );
       })}

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { drawAsImage, Group, Image, Path, type SkFont, type SkImage } from '@shopify/react-native-skia';
+import { Group, Image, Path, type SkFont, type SkImage } from '@shopify/react-native-skia';
 import type { GameState } from '../../engine';
 import type { MapGeometry } from './geometry';
+import { renderImage } from './offscreen';
 import { CityLayer, DecorLayer, fillColor, LabelLayer, LandLayer } from './layers';
 import type { SpriteImages } from './sprites';
 
@@ -70,7 +71,7 @@ export const StaticMap = React.memo(function StaticMap({
 
   useEffect(() => {
     let alive = true;
-    drawAsImage(
+    renderImage(
       <Group transform={[{ scale: BASE_RES }]}>
         <StaticContent {...p} />
       </Group>,
@@ -94,7 +95,7 @@ export const StaticMap = React.memo(function StaticMap({
     }
     let alive = true;
     const labels = detail.labelK !== null && labelFont ? { font: labelFont, k: detail.labelK } : null;
-    drawAsImage(
+    renderImage(
       <Group transform={[{ scale: detail.ps }, { translateX: -detail.x0 }, { translateY: -detail.y0 }]}>
         <StaticContent {...p} labels={labels} />
       </Group>,

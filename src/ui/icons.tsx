@@ -1,7 +1,8 @@
-import React from 'react';
-import { Image as RNImage } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Image as RNImage, Platform } from 'react-native';
 import { Canvas, Circle, Group, Path, Rect, RoundedRect, Skia, type SkPathBuilder } from '@shopify/react-native-skia';
 import { UI } from './assets.generated';
+import { renderImage } from './map/offscreen';
 import { COLORS } from './theme';
 
 // Иконки интерфейса 48×48: если в assets/ui лежит icon_<имя>.png — берётся он, иначе векторная заглушка.
@@ -315,9 +316,44 @@ function Glyph({ name, color }: { name: IconName; color: string }) {
   }
 }
 
+// В браузере каждый Canvas — отдельный WebGL-контекст (их не больше 16), поэтому там иконки
+// рисуются один раз в картинку и показываются обычным Image.
+const webIcons = new Map<string, Promise<string | null>>();
+const ICON_PX = 72;
+
+function webIcon(name: IconName, color: string): Promise<string | null> {
+  const key = `${name}:${color}`;
+  let p = webIcons.get(key);
+  if (!p) {
+    p = renderImage(
+      <Group transform={[{ scale: ICON_PX / 24 }]}>
+        <Glyph name={name} color={color} />
+      </Group>,
+      { width: ICON_PX, height: ICON_PX },
+    )
+      .then((img) => (img ? `data:image/png;base64,${img.encodeToBase64()}` : null))
+      .catch(() => null);
+    webIcons.set(key, p);
+  }
+  return p;
+}
+
+function WebIcon({ name, size, color }: { name: IconName; size: number; color: string }) {
+  const [uri, setUri] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    webIcon(name, color).then((u) => alive && setUri(u));
+    return () => {
+      alive = false;
+    };
+  }, [name, color]);
+  return uri ? <RNImage source={{ uri }} style={{ width: size, height: size }} /> : <RNImage style={{ width: size, height: size }} />;
+}
+
 export function Icon({ name, size = 20, color = COLORS.text }: { name: IconName; size?: number; color?: string }) {
   const png = UI[`icon_${name}`];
   if (png) return <RNImage source={png} style={{ width: size, height: size }} resizeMode="contain" />;
+  if (Platform.OS === 'web') return <WebIcon name={name} size={size} color={color} />;
   const k = size / 24;
   return (
     <Canvas style={{ width: size, height: size }}>

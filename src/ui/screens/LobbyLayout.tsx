@@ -79,7 +79,7 @@ export function LobbyLayout({
         <MapView
           map={map}
           game={game}
-          plates={[]}
+          units={[]}
           startPoints={markers}
           onTapCell={(cell) => {
             if (cell !== null && map.startPoints.includes(cell)) onPickStart?.(cell);

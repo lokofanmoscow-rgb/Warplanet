@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PixelRatio, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
-import { Canvas, Group, Rect, Skia, useTypeface, type SkFont } from '@shopify/react-native-skia';
+import { Atlas, Canvas, Group, Rect, Skia, useTypeface, type SkFont, type SkImage } from '@shopify/react-native-skia';
 import {
   GestureDetector,
   useCompetingGestures,
@@ -9,35 +9,55 @@ import {
   useSimultaneousGestures,
   useTapGesture,
 } from 'react-native-gesture-handler';
-import { runOnJS, useDerivedValue, useSharedValue, withTiming } from 'react-native-reanimated';
-import type { CellId, GameState, MapDef, Move, PlayerId } from '../../engine';
+import { Easing, runOnJS, useDerivedValue, useSharedValue, withTiming } from 'react-native-reanimated';
+import { isPeaceful, type CellId, type GameState, type MapDef, type PlanResult, type PlayerId, type PlayerOrders } from '../../engine';
 import { COLORS } from '../theme';
-import { cellAt, getGeometry } from './geometry';
-import {
-  ArrowLayer,
-  DragArrow,
-  fortKey,
-  ownershipKey,
-  plateAnchor,
-  PlateLayer,
-  SeaLayer,
-  SelectionLayer,
-  useNoiseTile,
-  StartPointsLayer,
-  WaterRipple,
-  type PlateInfo,
-} from './layers';
+import { cellAt, getGeometry, type MapGeometry } from './geometry';
+import { ArrowLayer, DragArrow, fortKey, ownershipKey, SeaLayer, SelectionLayer, useNoiseTile, StartPointsLayer, WaterRipple } from './layers';
 import { useSpriteImages } from './sprites';
 import { BASE_RES, StaticMap, type DetailRequest } from './StaticMap';
+import {
+  borderPos,
+  frameRect,
+  grabPoint,
+  homePos,
+  plateY,
+  UnitLayer,
+  UnitPlate,
+  unitPos,
+  UNIT_PX,
+  useUnitAtlas,
+  type UnitInfo,
+  type UnitPos,
+} from './units';
+
+/** Армия идёт по пути сразу после приказа. */
+export interface WalkInfo {
+  id: number;
+  owner: PlayerId;
+  count: number;
+  /** Клетки пути от исходной до цели включительно. */
+  path: CellId[];
+  /** Атака: армия останавливается на границе перед последней клеткой. */
+  attack: boolean;
+}
+
+/** Время на один шаг армии по карте, мс. */
+export const WALK_STEP_MS = 320;
 
 export interface MapViewProps {
   map: MapDef;
   game: GameState;
-  /** Плашки армий (с учётом приказов игрока). */
-  plates: PlateInfo[];
-  /** Приказы на движение и цвет стрелок. */
-  moves?: Move[];
+  /** Армии (с учётом приказов игрока). */
+  units: UnitInfo[];
+  /** Цвет стрелки, которую тянет палец. */
   moveColor?: string;
+  /** Армия, идущая по пути прямо сейчас. */
+  walk?: WalkInfo | null;
+  /** Клетки, где армии временно не показываются. */
+  hiddenUnits?: ReadonlySet<CellId>;
+  /** Слой поверх армий (показ боя). */
+  overlay?: (ctx: { geo: MapGeometry; k: number; font: SkFont | null; atlas: SkImage | null }) => React.ReactNode;
   selected?: CellId | null;
   /** Клетки, куда можно пойти из выделенной. */
   targets?: CellId[];
@@ -56,12 +76,12 @@ export interface MapViewProps {
 
 const FONT_SRC = require('../../../assets/fonts/PTSans-Bold.ttf');
 const EMPTY: CellId[] = [];
-const NO_MOVES: Move[] = [];
 
 export function MapView(props: MapViewProps) {
   const { map, game, interactive = true } = props;
   const geo = useMemo(() => getGeometry(map), [map]);
   const images = useSpriteImages();
+  const atlas = useUnitAtlas();
   const noise = useNoiseTile();
   const typeface = useTypeface(FONT_SRC);
   const plateFont = useMemo<SkFont | null>(() => (typeface ? Skia.Font(typeface, 13) : null), [typeface]);
@@ -175,16 +195,19 @@ export function MapView(props: MapViewProps) {
 
   const transform = useDerivedValue(() => [{ translateX: tx.value }, { translateY: ty.value }, { scale: sc.value }]);
 
+  // Размер иконок в единицах карты: на экране армия примерно одного размера при любом зуме.
+  const k = Math.max(0.6, Math.min(3, 1.05 / zoom));
+
   // ---------- Перетаскивание армии ----------
   const anchors = useSharedValue<number[]>([]);
   useEffect(() => {
     const flat: number[] = [];
     for (const id of props.draggable ?? []) {
-      const [x, y] = plateAnchor(map, id);
+      const [x, y] = grabPoint(map, id, k);
       flat.push(id, x, y);
     }
     anchors.value = flat;
-  }, [props.draggable, map, anchors]);
+  }, [props.draggable, map, anchors, k]);
   const dragging = useSharedValue(false);
   const dragFrom = useSharedValue<[number, number]>([0, 0]);
   const dragPoint = useSharedValue<[number, number]>([0, 0]);
@@ -239,9 +262,9 @@ export function MapView(props: MapViewProps) {
       // Палец на своей армии — тянем стрелку приказа, иначе двигаем карту.
       const mx = (e.x - tx.value) / sc.value;
       const my = (e.y - ty.value) / sc.value;
-      // Захват — только по самой плашке (примерно 44×32 точки экрана), иначе карта не листалась бы.
+      // Захват — только по самой армии с плашкой (примерно 44×48 точек экрана), иначе карта не листалась бы.
       const rx = 22 / sc.value;
-      const ry = 16 / sc.value;
+      const ry = 24 / sc.value;
       const a = anchors.value;
       let best = -1;
       let bestD = Infinity;
@@ -336,8 +359,6 @@ export function MapView(props: MapViewProps) {
 
   const gesture = useCompetingGestures(tap, useSimultaneousGestures(pan, pinch));
 
-  // Размер иконок в единицах карты: на экране плашка примерно одного размера при любом зуме.
-  const k = Math.max(0.6, Math.min(3, 1.05 / zoom));
   const own = useMemo(() => ownershipKey(game.cells), [game.cells]);
   const forts = useMemo(() => fortKey(game), [game]);
   const moveColor = props.moveColor ?? COLORS.gold;
@@ -363,8 +384,12 @@ export function MapView(props: MapViewProps) {
               />
               <SelectionLayer geo={geo} cell={props.selected ?? null} targets={props.targets ?? EMPTY} />
               {props.startPoints && <StartPointsLayer geo={geo} points={props.startPoints} font={plateFont} k={k} />}
-              <ArrowLayer geo={geo} moves={props.moves ?? NO_MOVES} color={moveColor} font={plateFont} k={k} />
-              <PlateLayer geo={geo} game={game} plates={props.plates} font={plateFont} k={k} />
+              <AttackArrows map={map} game={game} units={props.units} k={k} hidden={props.hiddenUnits} />
+              <UnitLayer map={map} game={game} units={props.units} font={plateFont} k={k} atlas={atlas} hidden={props.hiddenUnits} />
+              {props.walk && atlas.image && plateFont ? (
+                <Walker key={props.walk.id} map={map} game={game} walk={props.walk} atlas={atlas.image} font={plateFont} k={k} />
+              ) : null}
+              {props.overlay?.({ geo, k, font: plateFont, atlas: atlas.image })}
               <DragArrow from={dragFrom} point={dragPoint} active={dragging} color={moveColor} k={k} />
             </Group>
           </Canvas>
@@ -387,29 +412,141 @@ function clampOffset(x: number, y: number, z: number, w: number, h: number, mapW
   return [Math.min(hiX, Math.max(loX, x)), Math.min(hiY, Math.max(loY, y))];
 }
 
-/** Плашки по состоянию партии и плану игрока. */
-export function buildPlates(
-  game: GameState,
-  viewer: PlayerId | null,
-  projected: GameState | null,
-  moves: Move[],
-): PlateInfo[] {
-  const out: PlateInfo[] = [];
-  const outgoing = new Map<CellId, number>();
-  for (const m of moves) outgoing.set(m.from, (outgoing.get(m.from) ?? 0) + m.count);
+/**
+ * Армии по состоянию партии и плану игрока: свои — как в прогнозе (мирные перемещения уже на месте),
+ * отряды, идущие в атаку, стоят на границе с целью.
+ */
+export function buildUnits(game: GameState, viewer: PlayerId | null, plan: PlanResult | null, orders: PlayerOrders | null): UnitInfo[] {
+  const out: UnitInfo[] = [];
+  const recruited = new Set((orders?.actions ?? []).filter((a) => a.type === 'recruit').map((a) => a.cell));
   game.cells.forEach((c, id) => {
-    const mine = viewer !== null && c.owner === viewer;
-    const p = mine && projected ? projected.cells[id] : c;
-    if (p.troops <= 0 && !(mine && outgoing.has(id))) return;
-    out.push({
-      cell: id,
-      owner: c.owner,
-      troops: p.troops,
-      outgoing: mine ? outgoing.get(id) ?? 0 : 0,
-      recruited: mine && projected ? Math.max(0, projected.cells[id].troops - c.troops) : 0,
-    });
+    const proj = plan?.projected.cells[id];
+    const mine = viewer !== null && !!proj && (c.owner === viewer || proj.owner === viewer);
+    const p = mine ? proj! : c;
+    if (p.troops <= 0) return;
+    out.push({ key: `c${id}`, cell: id, owner: p.owner, troops: p.troops, recruited: mine && recruited.has(id) });
   });
+  if (plan && orders && viewer !== null) {
+    const groups = new Map<string, UnitInfo>();
+    orders.moves.forEach((m, i) => {
+      const r = plan.moveReach[i];
+      if (!r || plan.moveErrors[i] !== null || isPeaceful(r.kind)) return;
+      const stage = r.path[r.path.length - 2];
+      const key = `a${stage}>${m.to}`;
+      const g = groups.get(key);
+      if (g) g.troops += m.count;
+      else groups.set(key, { key, cell: stage, owner: viewer, troops: m.count, target: m.to });
+    });
+    out.push(...groups.values());
+  }
   return out;
+}
+
+/** Короткие стрелки от отрядов на границе к цели атаки. */
+const AttackArrows = React.memo(function AttackArrows({
+  map,
+  game,
+  units,
+  k,
+  hidden,
+}: {
+  map: MapDef;
+  game: GameState;
+  units: UnitInfo[];
+  k: number;
+  hidden?: ReadonlySet<CellId>;
+}) {
+  const arrows = units
+    .filter((u) => u.target !== undefined && u.owner !== null && !hidden?.has(u.target))
+    .map((u) => {
+      const p = unitPos(map, u, k);
+      const [tx, ty] = map.cells[u.target!].center;
+      return { key: u.key, x1: p.x, y1: p.y - p.size * 0.25, x2: tx, y2: ty, color: game.players[u.owner!].color };
+    });
+  return <ArrowLayer arrows={arrows} k={k} />;
+});
+
+/** Точки пути армии на карте. */
+function walkPoints(map: MapDef, walk: WalkInfo, k: number): UnitPos[] {
+  const pts = walk.path.map((id) => homePos(map, id, k));
+  if (walk.attack && walk.path.length >= 2) {
+    // Атака: последний шаг — только до границы.
+    pts[pts.length - 1] = borderPos(map, walk.path[walk.path.length - 2], walk.path[walk.path.length - 1], k);
+  }
+  return pts;
+}
+
+/** Армия, идущая по пути: фигурка из атласа и плашка с числом, шаг за шагом. */
+function Walker({
+  map,
+  game,
+  walk,
+  atlas,
+  font,
+  k,
+}: {
+  map: MapDef;
+  game: GameState;
+  walk: WalkInfo;
+  atlas: SkImage;
+  font: SkFont;
+  k: number;
+}) {
+  const color = game.players[walk.owner]?.color ?? null;
+  const pts = useMemo(() => walkPoints(map, walk, k), [map, walk, k]);
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const ships = pts.map((p) => p.ship);
+  const size = pts[0].size;
+  // Кадры атласа: суша вправо, суша влево, корабль вправо, корабль влево.
+  const rects = [
+    frameRect(color, false, false, false),
+    frameRect(color, false, false, true),
+    frameRect(color, true, false, false),
+    frameRect(color, true, false, true),
+  ].map((r) => [r.x, r.y]);
+  const n = pts.length;
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withTiming(n - 1, { duration: (n - 1) * WALK_STEP_MS, easing: Easing.linear });
+  }, [progress, n]);
+  const seg = () => {
+    'worklet';
+    const p = progress.value;
+    const i = Math.max(0, Math.min(n - 2, Math.floor(p)));
+    return { i, f: Math.min(1, p - i) };
+  };
+  const at = () => {
+    'worklet';
+    const { i, f } = seg();
+    const bob = Math.abs(Math.sin(progress.value * Math.PI * 2)) * 2.5 * k;
+    return [xs[i] + (xs[i + 1] - xs[i]) * f, ys[i] + (ys[i + 1] - ys[i]) * f - bob];
+  };
+  const transforms = useDerivedValue(() => {
+    const [x, y] = at();
+    const s = size / UNIT_PX;
+    return [Skia.RSXform(s, 0, x - size / 2, y - size * 0.93)];
+  });
+  const sprites = useDerivedValue(() => {
+    const { i, f } = seg();
+    const ship = f < 0.5 ? ships[i] : ships[i + 1];
+    const left = xs[i + 1] < xs[i];
+    const r = rects[(ship ? 2 : 0) + (left ? 1 : 0)];
+    return [Skia.XYWHRect(r[0], r[1], UNIT_PX, UNIT_PX)];
+  });
+  const plate = useDerivedValue(() => {
+    const [x, y] = at();
+    return [{ translateX: x }, { translateY: y }];
+  });
+  const py = plateY({ x: 0, y: 0, size, ship: ships[0], faceLeft: false }, k);
+  return (
+    <Group>
+      <Atlas image={atlas} sprites={sprites} transforms={transforms} />
+      <Group transform={plate}>
+        <UnitPlate x={0} y={py} label={`${walk.count}`} color={color} font={font} k={k} />
+      </Group>
+    </Group>
+  );
 }
 
 const styles = StyleSheet.create({
