@@ -61,6 +61,24 @@ export const CONFIG = {
     // Захваченная провинция.
     capturedHappiness: 40,
     capturedPopLoss: 0.1,
+    // Хозяйство: +devIncome к доходу провинции за уровень, до devMax; при захвате теряется уровень.
+    devIncome: 0.25,
+    devMax: 3,
+    // Торговля: +tradePerPartner к доходу за каждого соседа (по суше или через одно море), с кем мир,
+    // но не больше tradeMax.
+    tradePerPartner: 0.08,
+    tradeMax: 0.32,
+  },
+
+  // Войска: сила в атаке и обороне (пехота = 1), цена найма, содержание (пехота = 1),
+  // дальность по своей земле. Смешанная армия идёт со скоростью самого медленного.
+  units: {
+    inf: { label: 'Пехота', short: 'пех.', attack: 1, defense: 1, gold: 2, upkeep: 1, range: 4 },
+    cav: { label: 'Кавалерия', short: 'кав.', attack: 1.5, defense: 1, gold: 4, upkeep: 2, range: 6 },
+    art: { label: 'Артиллерия', short: 'арт.', attack: 1.6, defense: 0.7, gold: 5, upkeep: 2, range: 3 },
+    // Если артиллерии в атакующей армии не меньше этой доли — укрепление защитника не действует,
+    // меньше — действует частично.
+    siegeShare: 0.2,
   },
 
   ap: {
@@ -76,6 +94,8 @@ export const CONFIG = {
     loot: { ap: 1, popPerGold: 200, popLoss: 0.1, happinessLoss: 20 },
     // Праздник: +happiness счастья в провинции; цена — население / popPerGold, не меньше minGold.
     festival: { ap: 0.5, popPerGold: 2000, minGold: 5, happiness: 20 },
+    // Развитие хозяйства: цена уровня 1, 2, 3.
+    develop: { ap: 1, gold: [40, 80, 120] },
   },
 
   move: {
@@ -105,6 +125,14 @@ export const CONFIG = {
   war: {
     // Объявивший войну теряет столько счастья во всех своих провинциях; на кого напали — нет.
     happinessLoss: 10,
+    // Усталость от войны снижает цель счастья у обеих сторон: за каждую войну wearyBase,
+    // +1 за каждые wearyEvery ходов войны, не больше wearyPerWar за войну и wearyMax всего.
+    wearyBase: 2,
+    wearyEvery: 4,
+    wearyPerWar: 8,
+    wearyMax: 15,
+    // После мира столько ходов нельзя снова объявить войну друг другу.
+    truceTurns: 10,
   },
 
   battle: {
@@ -119,6 +147,18 @@ export const CONFIG = {
   ai: {
     // ИИ ставит налог, при котором счастье держится не ниже этого.
     minHappiness: 52,
+    // Характеры ИИ. attack — множитель нужного перевеса для атаки; warRatio — во сколько раз армия должна
+    // быть больше, чтобы начать новую войну; fronts — сколько войн сразу; develop — доля свободного золота
+    // на хозяйство; peaceAccept — принимает мир, пока его армия меньше вражеской × peaceAccept;
+    // peaceOffer — сам предлагает мир, если его армия меньше вражеской × peaceOffer; cav и art — доля
+    // кавалерии и артиллерии в найме для атаки.
+    characters: {
+      aggressive: { label: 'Агрессор', attack: 0.92, warRatio: 1.0, fronts: 2, develop: 0.15, peaceAccept: 0.8, peaceOffer: 0.5, cav: 0.4, art: 0.15 },
+      trader: { label: 'Торговец', attack: 1.1, warRatio: 1.7, fronts: 1, develop: 0.6, peaceAccept: 2.2, peaceOffer: 1.0, cav: 0.15, art: 0.05 },
+      defender: { label: 'Оборонщик', attack: 1.05, warRatio: 1.4, fronts: 1, develop: 0.35, peaceAccept: 1.6, peaceOffer: 0.85, cav: 0.1, art: 0.25 },
+    },
+    // Без характера (старые сохранения) — как раньше.
+    balanced: { label: 'Обычный', attack: 1, warRatio: 1.2, fronts: 2, develop: 0.25, peaceAccept: 1.2, peaceOffer: 0.7, cav: 0.25, art: 0.1 },
     // Минимальный гарнизон столицы.
     capitalMinGarrison: 5,
     difficulties: {
@@ -138,7 +178,7 @@ export const CONFIG = {
   net: {
     port: 47630,
     serviceType: 'conquest',
-    protocolVersion: 5,
+    protocolVersion: 6,
     pingIntervalMs: 5000,
     // Нет данных дольше этого — соединение считается потерянным.
     timeoutMs: 15000,

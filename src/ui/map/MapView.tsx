@@ -10,7 +10,7 @@ import {
   useTapGesture,
 } from 'react-native-gesture-handler';
 import { Easing, runOnJS, useDerivedValue, useSharedValue, withTiming } from 'react-native-reanimated';
-import { isPeaceful, type CellId, type GameState, type MapDef, type PlanResult, type PlayerId, type PlayerOrders } from '../../engine';
+import { isPeaceful, squadOf, type CellId, type GameState, type MapDef, type PlanResult, type PlayerId, type PlayerOrders } from '../../engine';
 import { COLORS } from '../theme';
 import { cellAt, getGeometry, type MapGeometry } from './geometry';
 import {
@@ -452,7 +452,8 @@ export function buildUnits(
     if (p.troops <= 0) return;
     // Чужие армии в тумане войны не видны.
     if (!mine && visible && !visible.has(id)) return;
-    out.push({ key: `c${id}`, cell: id, owner: p.owner, troops: p.troops, recruited: mine && recruited.has(id) });
+    const sq = squadOf(p);
+    out.push({ key: `c${id}`, cell: id, owner: p.owner, troops: p.troops, cav: sq.cav, art: sq.art, recruited: mine && recruited.has(id) });
   });
   if (plan && orders && viewer !== null) {
     const groups = new Map<string, UnitInfo>();
@@ -462,8 +463,11 @@ export function buildUnits(
       const stage = r.path[r.path.length - 2];
       const key = `a${stage}>${m.to}`;
       const g = groups.get(key);
-      if (g) g.troops += m.count;
-      else groups.set(key, { key, cell: stage, owner: viewer, troops: m.count, target: m.to });
+      if (g) {
+        g.troops += m.count;
+        g.cav = (g.cav ?? 0) + (m.cav ?? 0);
+        g.art = (g.art ?? 0) + (m.art ?? 0);
+      } else groups.set(key, { key, cell: stage, owner: viewer, troops: m.count, cav: m.cav ?? 0, art: m.art ?? 0, target: m.to });
     });
     out.push(...groups.values());
   }

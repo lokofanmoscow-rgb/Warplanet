@@ -28,10 +28,10 @@ export const UNIT_PX = 96;
 const NEUTRAL = '#9C8F7C';
 const ROWS: string[] = [...CONFIG.players.colors, NEUTRAL];
 
-export type UnitFrame = 'idle' | 'fight' | 'ship';
-const COLS: Record<UnitFrame, number> = { idle: 0, fight: 1, ship: 2 };
-// Те же три кадра, отражённые (смотрят влево), — в колонках 3–5.
-const FLIP_OFFSET = 3;
+export type UnitFrame = 'idle' | 'fight' | 'ship' | 'cav' | 'art';
+const COLS: Record<UnitFrame, number> = { idle: 0, fight: 1, ship: 2, cav: 3, art: 4 };
+// Те же кадры, отражённые (смотрят влево), — в колонках 5–9.
+const FLIP_OFFSET = 5;
 
 function poly(points: number[]) {
   const b = Skia.PathBuilder.Make();
@@ -152,11 +152,122 @@ function Ship({ color }: { color: string }) {
   );
 }
 
-function Frame({ frame, color }: { frame: UnitFrame; color: string }) {
-  return frame === 'ship' ? <Ship color={color} /> : <SoldierGroup color={color} fight={frame === 'fight'} />;
+/** Всадник с саблей в клетке 96×96 (копыта у нижнего края). */
+function Horseman({ color }: { color: string }) {
+  const dark = shade(color, -0.38);
+  const horse = '#7A5232';
+  const horseDark = '#583820';
+  const sw = 1.6;
+  const neck = poly([60, 58, 70, 36, 80, 38, 72, 62]);
+  const head = poly([70, 34, 88, 42, 87, 49, 74, 47]);
+  const torso = poly([38, 22, 52, 22, 51, 44, 40, 44]);
+  const helmet = Skia.PathBuilder.Make().addArc({ x: 38.5, y: 7, width: 13, height: 13 }, 180, 180).close().build();
+  const tail = Skia.PathBuilder.Make().moveTo(20, 56).quadTo(8, 62, 10, 78).build();
+  return (
+    <Group>
+      <Oval x={14} y={84} width={68} height={8} color="rgba(0,0,0,0.28)" />
+      <Path path={tail} color={horseDark} style="stroke" strokeWidth={5} strokeCap="round" />
+      {/* дальние ноги темнее */}
+      <Rect x={27} y={64} width={5} height={22} color={horseDark} />
+      <Rect x={58} y={64} width={5} height={22} color={horseDark} />
+      <Oval x={16} y={46} width={56} height={24} color={horse} />
+      <Rect x={20} y={64} width={5.5} height={23} color={horse} />
+      <Rect x={64} y={64} width={5.5} height={23} color={horse} />
+      {[19.5, 26.5, 57.5, 63.5].map((x) => (
+        <Rect key={x} x={x} y={85} width={6.5} height={3.5} color="#22190F" />
+      ))}
+      <Path path={neck} color={horse} />
+      <Path path={head} color={horse} />
+      <Path
+        path={Skia.PathBuilder.Make().moveTo(62, 56).lineTo(70, 37).build()}
+        color={horseDark}
+        style="stroke"
+        strokeWidth={3}
+        strokeCap="round"
+      />
+      <Circle cx={80} cy={42} r={1.4} color="#1B130C" />
+      <Oval x={16} y={46} width={56} height={24} color={OUTLINE} style="stroke" strokeWidth={sw} />
+      <Path path={head} color={OUTLINE} style="stroke" strokeWidth={sw} />
+      {/* чепрак в цвет страны */}
+      <RoundedRect x={34} y={44} width={22} height={13} r={3} color={color} />
+      <RoundedRect x={34} y={44} width={22} height={13} r={3} color={OUTLINE} style="stroke" strokeWidth={1.2} />
+      {/* всадник */}
+      <Rect x={41} y={42} width={5} height={14} color="#3A2E22" />
+      <Path path={torso} color={color} />
+      <Path path={poly([45, 22, 52, 22, 51, 44, 45, 44])} color={dark} opacity={0.55} />
+      <Path path={torso} color={OUTLINE} style="stroke" strokeWidth={sw} />
+      {/* сабля над головой */}
+      <Path
+        path={Skia.PathBuilder.Make().moveTo(52, 30).quadTo(64, 18, 70, 6).build()}
+        color="#D9D4CA"
+        style="stroke"
+        strokeWidth={2.6}
+        strokeCap="round"
+      />
+      <RoundedRect x={49} y={26} width={5} height={11} r={2.5} color={dark} />
+      <Circle cx={45} cy={16} r={5.5} color="#EFC59C" />
+      <Circle cx={45} cy={16} r={5.5} color={OUTLINE} style="stroke" strokeWidth={sw} />
+      <Path path={helmet} color={dark} />
+      <Rect x={37} y={12} width={16} height={2.4} color={shade(color, -0.55)} />
+      <Path path={helmet} color={OUTLINE} style="stroke" strokeWidth={sw} />
+    </Group>
+  );
 }
 
-const FRAMES: UnitFrame[] = ['idle', 'fight', 'ship'];
+/** Пушка на лафете в клетке 96×96 (колесо стоит у нижнего края). */
+function Cannon({ color }: { color: string }) {
+  const barrel = poly([30, 50, 84, 34, 87, 43, 34, 60]);
+  const carriage = poly([20, 62, 58, 50, 62, 66, 24, 76]);
+  const wood = '#6B4A2B';
+  const sw = 1.6;
+  return (
+    <Group>
+      <Oval x={6} y={82} width={78} height={9} color="rgba(0,0,0,0.28)" />
+      <Path
+        path={Skia.PathBuilder.Make().moveTo(26, 70).lineTo(8, 86).build()}
+        color={wood}
+        style="stroke"
+        strokeWidth={6}
+        strokeCap="round"
+      />
+      <Path path={carriage} color={wood} />
+      <Path path={poly([22, 66, 60, 56, 61, 61, 23, 71])} color={color} />
+      <Path path={carriage} color={OUTLINE} style="stroke" strokeWidth={sw} />
+      <Path path={barrel} color="#3D3C40" />
+      <Path path={poly([32, 52, 84, 37, 85, 40, 33, 55])} color="#6C6A70" />
+      <Path path={barrel} color={OUTLINE} style="stroke" strokeWidth={sw} />
+      <RoundedRect x={82} y={33} width={6} height={11} r={2} color="#2A292C" />
+      {/* колесо со спицами */}
+      <Circle cx={46} cy={72} r={15} color={wood} style="stroke" strokeWidth={4.5} />
+      {[0, 45, 90, 135].map((a) => {
+        const r = (a * Math.PI) / 180;
+        return (
+          <Path
+            key={a}
+            path={Skia.PathBuilder.Make()
+              .moveTo(46 - Math.cos(r) * 13, 72 - Math.sin(r) * 13)
+              .lineTo(46 + Math.cos(r) * 13, 72 + Math.sin(r) * 13)
+              .build()}
+            color="#5A3E25"
+            style="stroke"
+            strokeWidth={2}
+          />
+        );
+      })}
+      <Circle cx={46} cy={72} r={17.2} color={OUTLINE} style="stroke" strokeWidth={sw} />
+      <Circle cx={46} cy={72} r={3.5} color="#2B2118" />
+    </Group>
+  );
+}
+
+function Frame({ frame, color }: { frame: UnitFrame; color: string }) {
+  if (frame === 'ship') return <Ship color={color} />;
+  if (frame === 'cav') return <Horseman color={color} />;
+  if (frame === 'art') return <Cannon color={color} />;
+  return <SoldierGroup color={color} fight={frame === 'fight'} />;
+}
+
+const FRAMES: UnitFrame[] = ['idle', 'fight', 'ship', 'cav', 'art'];
 
 function AtlasContent() {
   return (
@@ -219,6 +330,9 @@ export interface UnitInfo {
   cell: CellId;
   owner: PlayerId | null;
   troops: number;
+  /** Из них кавалерия и артиллерия — рисуются всадником и пушкой рядом с отрядом. */
+  cav?: number;
+  art?: number;
   /** Нанято в этом ходу (плашка с «+»). */
   recruited?: boolean;
   /** Атака в этом ходу: армия стоит на границе и смотрит на цель. */
@@ -285,6 +399,27 @@ export function grabPoint(map: MapDef, cell: CellId, k: number): [number, number
 
 export function frameRect(color: string | null, ship: boolean, fight: boolean, faceLeft: boolean): SkRect {
   return spriteRect(color, ship ? 'ship' : fight ? 'fight' : 'idle', faceLeft);
+}
+
+/**
+ * Фигурки армии на суше: главная — пехота (если есть), рядом поменьше — всадник и пушка.
+ * dx, dy — сдвиг от места армии в долях размера, scale — масштаб.
+ */
+export function figuresOf(u: UnitInfo, ship: boolean): { frame: UnitFrame; dx: number; dy: number; scale: number }[] {
+  if (ship) return [{ frame: 'ship', dx: 0, dy: 0, scale: 1 }];
+  const cav = u.cav ?? 0;
+  const art = u.art ?? 0;
+  const inf = u.troops - cav - art;
+  const main: UnitFrame = inf > 0 ? (u.target !== undefined ? 'fight' : 'idle') : cav > 0 ? 'cav' : 'art';
+  const out = [{ frame: main, dx: 0, dy: 0, scale: 1 }];
+  if (cav > 0 && main !== 'cav') out.unshift({ frame: 'cav', dx: -0.5, dy: -0.06, scale: 0.8 });
+  if (art > 0 && main !== 'art') out.push({ frame: 'art', dx: 0.48, dy: 0.04, scale: 0.72 });
+  return out;
+}
+
+function shifted(p: UnitPos, f: { dx: number; dy: number; scale: number }): UnitPos {
+  const dir = p.faceLeft ? -1 : 1;
+  return { ...p, x: p.x + f.dx * p.size * dir, y: p.y + f.dy * p.size, size: p.size * f.scale };
 }
 
 export function frameXform(p: UnitPos): SkRSXform {
@@ -373,25 +508,28 @@ export const UnitLayer = React.memo(function UnitLayer({
       ),
     [units, hidden],
   );
-  // Нейтральное ополчение — только плашка, у стран — фигурки.
-  const figures = useMemo(() => shown.filter((u) => u.owner !== null), [shown]);
-  const sprites = useMemo(
+  // Нейтральное ополчение — только плашка, у стран — фигурки (пехота, всадник, пушка).
+  const figures = useMemo(
     () =>
-      figures.map((u) => {
-        const p = unitPos(map, u, k);
-        return frameRect(colorOf(u.owner), p.ship, u.target !== undefined, p.faceLeft);
-      }),
-    [figures, map, k], // eslint-disable-line react-hooks/exhaustive-deps
+      shown
+        .filter((u) => u.owner !== null)
+        .flatMap((u) => {
+          const p = unitPos(map, u, k);
+          return figuresOf(u, p.ship).map((f, i) => ({ key: `${u.key}:${i}`, frame: f.frame, pos: shifted(p, f), owner: u.owner }));
+        }),
+    [shown, map, k],
   );
-  const xforms = useMemo(() => figures.map((u) => frameXform(unitPos(map, u, k))), [figures, map, k]);
+  const sprites = useMemo(
+    () => figures.map((f) => spriteRect(colorOf(f.owner), f.frame, f.pos.faceLeft)),
+    [figures], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const xforms = useMemo(() => figures.map((f) => frameXform(f.pos)), [figures]);
   return (
     <Group>
       {atlas.image ? (
         <Atlas image={atlas.image} sprites={sprites} transforms={xforms} />
       ) : atlas.failed ? (
-        figures.map((u) => (
-          <UnitVector key={u.key} pos={unitPos(map, u, k)} color={colorOf(u.owner) ?? NEUTRAL} fight={u.target !== undefined} />
-        ))
+        figures.map((f) => <UnitVector key={f.key} pos={f.pos} color={colorOf(f.owner) ?? NEUTRAL} frame={f.frame} />)
       ) : null}
       {font &&
         shown.map((u) => {
@@ -414,7 +552,7 @@ export const UnitLayer = React.memo(function UnitLayer({
 });
 
 /** Запасной вариант без атласа: та же фигурка вектором. */
-export function UnitVector({ pos, color, fight }: { pos: UnitPos; color: string; fight: boolean }) {
+export function UnitVector({ pos, color, fight, frame }: { pos: UnitPos; color: string; fight?: boolean; frame?: UnitFrame }) {
   const s = pos.size / UNIT_PX;
   const transform = [
     { translateX: pos.x - (pos.faceLeft ? -pos.size / 2 : pos.size / 2) },
@@ -424,7 +562,7 @@ export function UnitVector({ pos, color, fight }: { pos: UnitPos; color: string;
   ];
   return (
     <Group transform={transform}>
-      <Frame frame={pos.ship ? 'ship' : fight ? 'fight' : 'idle'} color={color} />
+      <Frame frame={frame ?? (pos.ship ? 'ship' : fight ? 'fight' : 'idle')} color={color} />
     </Group>
   );
 }

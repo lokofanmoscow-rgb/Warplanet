@@ -2,6 +2,7 @@ import { fight } from './battle';
 import { CONFIG } from './config';
 import type { Rng } from './rng';
 import type { GameState, MapDef, TurnEvent } from './types';
+import { perSoldier, setSquad, squadOf, takeLosses } from './units';
 
 const R = CONFIG.revolt;
 
@@ -30,16 +31,18 @@ export function applyRevolts(state: GameState, map: MapDef, rng: Rng, log: TurnE
     let left = rebels;
     if (garrison > 0) {
       const fort = cell.fortified ? CONFIG.actions.fortify.defenseMult : 1;
-      const r = fight(rng, { troops: rebels, strength: 1, fort: 1 }, { troops: garrison, strength: fort, fort }, true);
+      const squad = squadOf(cell);
+      const r = fight(rng, { troops: rebels, strength: 1, fort: 1 }, { troops: garrison, strength: perSoldier(squad, 'defense') * fort, fort }, true);
       if (r.winner !== 'a') {
-        cell.troops = r.bLeft;
+        setSquad(cell, takeLosses(squad, garrison - r.bLeft));
         log.push({ t: 'revolt', cell: id, player, rebels, garrison, suppressed: true, left: r.bLeft });
         return;
       }
       left = r.aLeft;
     }
     cell.owner = null;
-    cell.troops = Math.max(1, left);
+    // Повстанцы — пехота.
+    setSquad(cell, { inf: Math.max(1, left), cav: 0, art: 0 });
     cell.fortified = false;
     log.push({ t: 'revolt', cell: id, player, rebels, garrison, suppressed: false, left: cell.troops });
     if (state.players[player].capital === id) {

@@ -5,13 +5,18 @@ import {
   CONFIG,
   forecastIncome,
   getMap,
-  happinessTarget,
   previewEconomy,
+  squadSize,
+  targetHappiness,
+  tradePartners,
+  UNIT_TYPES,
+  warWeariness,
   type CellId,
   type GameState,
   type MapDef,
   type MoveKind,
   type PlayerId,
+  type Squad,
 } from '../../engine';
 import { Button, Panel, Row, Stepper, Swatch, T, Title } from '../components';
 import { describeLog, fmtAp, plural, type NewsItem } from '../describe';
@@ -38,7 +43,18 @@ const MOVE_TITLE: Record<MoveKind, string> = {
   naval: 'Морской бой',
 };
 
-/** Выбор числа солдат для приказа на перемещение. */
+/** Не больше cap солдат всего: сначала пехота, потом кавалерия и пушки. */
+function fillSquad(types: (keyof Squad)[], available: Squad, cap: number): Squad {
+  const out: Squad = { inf: 0, cav: 0, art: 0 };
+  let left = cap;
+  for (const t of types) {
+    out[t] = Math.max(0, Math.min(available[t], left));
+    left -= out[t];
+  }
+  return out;
+}
+
+/** Выбор войск для приказа на перемещение: по типам, только те, что дойдут. */
 export function MoveDialog({
   map,
   from,
@@ -55,17 +71,26 @@ export function MoveDialog({
   to: CellId;
   kind: MoveKind;
   steps: number;
-  available: number;
+  available: Squad;
   goldLeft: number;
-  onConfirm: (count: number) => void;
+  onConfirm: (squad: Squad) => void;
   onCancel: () => void;
 }) {
   const { s } = useLayout();
   const M = CONFIG.move;
+  const U = CONFIG.units;
   const embark = kind === 'embark' || (kind === 'naval' && map.cells[from].kind === 'land');
+  // По суше у каждого типа своя дальность; флот везёт всех.
+  const fromLand = map.cells[from].kind === 'land';
+  const present = UNIT_TYPES.filter((t) => available[t] > 0);
+  const types = present.filter((t) => !fromLand || U[t].range >= steps);
+  const tooSlow = present.filter((t) => !types.includes(t));
   // На корабли — сколько хватает золота.
-  const max = embark ? Math.min(available, Math.floor(goldLeft / M.embarkGoldPerSoldier)) : available;
-  const [count, setCount] = useState(Math.max(1, max));
+  const cap = embark ? Math.floor(goldLeft / M.embarkGoldPerSoldier) : Infinity;
+  const [counts, setCounts] = useState<Squad>(() => fillSquad(types, available, cap));
+  const count = squadSize(counts);
+  const max = Math.min(cap, types.reduce((sum, t) => sum + available[t], 0));
+  const maxOf = (t: keyof Squad) => Math.min(available[t], cap - (count - counts[t]));
   const cost = [`${fmtAp(M.ap)} ОД`, embark ? `${count * M.embarkGoldPerSoldier} зол.` : null].filter(Boolean).join(' · ');
   const note: Record<MoveKind, string> = {
     march: `По своей земле: ${steps} ${plural(steps, 'клетка', 'клетки', 'клеток')}. Армия сразу будет на месте.`,
@@ -87,29 +112,42 @@ export function MoveDialog({
       <T size={13} style={{ marginTop: 6 * s, color: COLORS.goldLight }}>
         Цена: {cost}
       </T>
+      {tooSlow.length > 0 && (
+        <T dim size={12} style={{ marginTop: 4 * s }}>
+          Не дойдут: {tooSlow.map((t) => `${U[t].label.toLowerCase()} (до ${U[t].range} кл.)`).join(', ')}
+        </T>
+      )}
       {max <= 0 ? (
         <T size={14} style={{ marginVertical: 16 * s, textAlign: 'center', color: COLORS.danger }}>
-          Не хватает золота на корабли
+          {types.length === 0 ? 'Эти войска сюда за ход не дойдут' : 'Не хватает золота на корабли'}
         </T>
       ) : (
-        <View style={{ alignItems: 'center', marginVertical: 16 * s, gap: 10 * s }}>
-          <Stepper value={count} min={1} max={max} big={10} onChange={setCount} />
+        <View style={{ alignItems: 'center', marginVertical: 12 * s, gap: 8 * s }}>
+          {types.map((t) => (
+            <View key={t} style={{ alignItems: 'center', gap: 2 * s }}>
+              {types.length > 1 || t !== 'inf' ? (
+                <T dim size={12}>
+                  {U[t].label}: {counts[t]} из {available[t]}
+                </T>
+              ) : null}
+              <Stepper
+                value={counts[t]}
+                min={types.length > 1 ? 0 : 1}
+                max={Math.max(0, maxOf(t))}
+                big={10}
+                onChange={(v) => setCounts((c) => ({ ...c, [t]: v }))}
+              />
+            </View>
+          ))}
           <Row gap={8}>
-            <Button small label="Половина" onPress={() => setCount(Math.max(1, Math.floor(max / 2)))} />
-            <Button small label={`Все (${max})`} onPress={() => setCount(max)} />
+            <Button small label="Половина" onPress={() => setCounts(fillSquad(types, { inf: Math.ceil(available.inf / 2), cav: Math.ceil(available.cav / 2), art: Math.ceil(available.art / 2) }, Math.max(1, Math.floor(max / 2))))} />
+            <Button small label={`Все (${max})`} onPress={() => setCounts(fillSquad(types, available, cap))} />
           </Row>
         </View>
       )}
       <Row gap={10}>
         <Button label="Отмена" onPress={onCancel} style={{ flex: 1 }} />
-        <Button
-          label="Отправить"
-          variant="primary"
-          icon="move"
-          disabled={max <= 0}
-          onPress={() => onConfirm(Math.min(count, max))}
-          style={{ flex: 1 }}
-        />
+        <Button label="Отправить" variant="primary" icon="move" disabled={count <= 0} onPress={() => onConfirm(counts)} style={{ flex: 1 }} />
       </Row>
     </Overlay>
   );
@@ -138,6 +176,8 @@ export function TaxDialog({
   const current = game.players[player].tax;
   const now = previewEconomy(game, map, player, current);
   const later = forecastIncome(game, map, player, tax);
+  const partners = tradePartners(game, map, player);
+  const weary = warWeariness(game, player);
   const E = CONFIG.economy;
   return (
     <Overlay onDismiss={onCancel}>
@@ -151,10 +191,15 @@ export function TaxDialog({
         <Stepper value={tax} min={E.taxMin} max={E.taxMax} step={E.taxStep} big={50} format={(v) => `${v}%`} onChange={editable ? setTax : () => {}} />
       </View>
       <View style={{ gap: 4 * s, marginBottom: 14 * s }}>
-        <T>Цель счастья: {Math.round(happinessTarget(tax))}%</T>
+        <T>
+          Цель счастья: {Math.round(targetHappiness(game, player, tax))}%{weary > 0 ? ` (усталость от войны −${weary})` : ''}
+        </T>
         <T>Доход со следующего хода: ≈ +{later}</T>
         <T dim size={13}>
           В этом ходу — налог {current}%: доход +{now.income}, содержание армии −{now.upkeep}
+        </T>
+        <T dim size={13}>
+          Торговля: {partners.length > 0 ? `+${Math.round(Math.min(CONFIG.economy.tradeMax, partners.length * CONFIG.economy.tradePerPartner) * 100)}% к доходу (${partners.map((p) => game.players[p].name).join(', ')})` : 'нет мирных соседей'}
         </T>
         <T dim size={12}>
           Доход полный при счастье от {E.fullAt}%, четверть при {E.partialAt}–{E.fullAt - 1}%, ниже — нет дохода.
@@ -247,6 +292,27 @@ export function HandoffScreen({ game, player, onReady }: { game: GameState; play
         </View>
       </Panel>
     </View>
+  );
+}
+
+/** Другая страна предлагает мир: принять (мир — в этом ходу) или отклонить. */
+export function PeaceOfferDialog({ from, onAccept, onReject }: { from: string; onAccept: () => void; onReject: () => void }) {
+  const { s } = useLayout();
+  return (
+    <Overlay onDismiss={onReject} maxWidth={400}>
+      <Title size={22} style={{ textAlign: 'center' }}>
+        Предложение мира
+      </Title>
+      <T style={{ textAlign: 'center', marginTop: 8 * s }}>«{from}» предлагает мир.</T>
+      <T dim size={13} style={{ textAlign: 'center', marginTop: 6 * s }}>
+        Если принять, война закончится в этом ходу: атаки на эту страну не пойдут, вернётся торговля, пропадёт усталость от
+        войны. Затем {CONFIG.war.truceTurns} ходов перемирия.
+      </T>
+      <Row gap={10} style={{ marginTop: 16 * s }}>
+        <Button label="Отклонить" onPress={onReject} style={{ flex: 1 }} />
+        <Button label="Принять" variant="primary" icon="check" onPress={onAccept} style={{ flex: 1 }} />
+      </Row>
+    </Overlay>
   );
 }
 

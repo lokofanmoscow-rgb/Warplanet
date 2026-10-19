@@ -4,16 +4,28 @@ import {
   CONFIG,
   clampTax,
   cloneState,
+  desert,
+  developCost,
+  EMPTY_SQUAD,
   getMap,
   happinessTarget,
+  hasPeaceOffer,
   maxRecruit,
   newBudget,
   previewEconomy,
   atWar,
   reachable,
   simulatePlan,
-  unpaidLoss,
+  squadOf,
+  squadPower,
+  squadSize,
+  subSquads,
+  truceUntil,
+  warError,
+  warTurns,
+  warWeariness,
   type Action,
+  type AiCharacter,
   type CellId,
   type Difficulty,
   type GameState,
@@ -22,16 +34,35 @@ import {
   type PlayerId,
   type PlayerOrders,
   type Reach,
+  type Squad,
+  type UnitType,
 } from '../engine';
 
-/** Налог: самый высокий, при котором счастье держится не ниже порога. */
-export function aiTax(): number {
+/** Налог: самый высокий, при котором счастье держится не ниже порога (с учётом усталости от войны). */
+export function aiTax(weariness = 0): number {
   const E = CONFIG.economy;
   let best = E.taxMin;
   for (let t = E.taxMin; t <= E.taxMax; t += E.taxStep) {
-    if (happinessTarget(t) >= CONFIG.ai.minHappiness) best = t;
+    if (happinessTarget(t) - weariness >= CONFIG.ai.minHappiness) best = t;
   }
   return clampTax(best);
+}
+
+export interface AiProfile {
+  label: string;
+  attack: number;
+  warRatio: number;
+  fronts: number;
+  develop: number;
+  peaceAccept: number;
+  peaceOffer: number;
+  cav: number;
+  art: number;
+}
+
+/** Повадки ИИ по характеру; без характера (старые сохранения) — обычный. */
+export function profileOf(character: AiCharacter | undefined): AiProfile {
+  return character ? CONFIG.ai.characters[character] : CONFIG.ai.balanced;
 }
 
 interface Target {
@@ -42,24 +73,26 @@ interface Target {
 
 /**
  * Приказы ИИ на ход. ИИ видит всю карту, союзов не заключает; войну объявляет тому, на кого нападает.
- * По порядку: налог → цели → найм у угрожаемых границ → укрепление → покупка соседних нейтралов →
- * атака с перевесом → подтягивание армий к фронту; столица не остаётся без гарнизона.
- * Часть ОД заранее откладывается на перемещения (каждое стоит 0,5 ОД).
+ * По порядку: налог → мир → цели → найм у угрожаемых границ → укрепление → покупка соседних нейтралов →
+ * хозяйство → атака с перевесом → подтягивание армий к фронту; столица не остаётся без гарнизона.
+ * Часть ОД заранее откладывается на перемещения (каждое стоит 0,5 ОД). Повадки зависят от характера.
  */
 export function planOrders(state: GameState, playerId: PlayerId, difficulty: Difficulty): PlayerOrders {
   const map = getMap(state.mapId);
   const me = state.players[playerId];
-  if (!me?.alive) return { tax: me?.tax ?? 0, actions: [], moves: [], wars: [] };
+  if (!me?.alive) return { tax: me?.tax ?? 0, actions: [], moves: [], wars: [], peace: [] };
   const D = CONFIG.ai.difficulties[difficulty];
+  const P = profileOf(me.character);
+  const attackRatio = D.attackRatio * P.attack;
 
-  // 1. Налог и прогноз экономики хода.
-  const tax = aiTax();
+  // 1. Налог (действует со следующего хода) и прогноз экономики этого хода — по действующему налогу.
+  const tax = aiTax(warWeariness(state, playerId));
   const proj = cloneState(state);
-  const eco = previewEconomy(state, map, playerId, tax);
+  const eco = previewEconomy(state, map, playerId, me.tax);
   proj.players[playerId].tax = tax;
   proj.players[playerId].gold = eco.gold;
   if (!eco.paid) {
-    for (const c of proj.cells) if (c.owner === playerId && c.troops > 0) c.troops -= unpaidLoss(c.troops);
+    for (const c of proj.cells) if (c.owner === playerId && c.troops > 0) desert(c);
   }
   const budget = newBudget(state, map, playerId);
   // ОД на перемещения: по половине на каждую армию, но не больше половины всех ОД.
@@ -78,11 +111,14 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
   const cells = proj.cells;
   const isLand = (id: CellId) => map.cells[id].kind === 'land';
   const mine = (id: CellId) => cells[id].owner === playerId;
-  const isEnemy = (owner: PlayerId | null) => owner !== null && owner !== playerId;
+  // Опасен любой чужой, кроме тех, с кем перемирие: им нельзя даже объявить войну.
+  const isEnemy = (owner: PlayerId | null) => owner !== null && owner !== playerId && truceUntil(proj, playerId, owner) === null;
+  const attackOf = (id: CellId) => squadPower(squadOf(cells[id]), 'attack');
+  const defensePowerOf = (id: CellId) => squadPower(squadOf(cells[id]), 'defense');
 
-  // Угроза: самая большая вражеская армия по соседству.
+  // Угроза: самая сильная вражеская армия по соседству (сила в атаке).
   const threat = (id: CellId, except: CellId | null = null) =>
-    map.cells[id].neighbors.reduce((m, n) => (n !== except && isEnemy(cells[n].owner) ? Math.max(m, cells[n].troops) : m), 0);
+    map.cells[id].neighbors.reduce((m, n) => (n !== except && isEnemy(cells[n].owner) ? Math.max(m, attackOf(n)) : m), 0);
   // Оборона цели. Соседние армии хозяина успевают прийти на помощь до боя — берём половину.
   const defenseOf = (id: CellId) => {
     const c = cells[id];
@@ -90,9 +126,23 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
     const help =
       c.owner === null || !isLand(id)
         ? 0
-        : map.cells[id].neighbors.reduce((sum, n) => (isLand(n) && cells[n].owner === c.owner ? sum + cells[n].troops : sum), 0);
-    return (c.troops + help * 0.5) * mult * (isLand(id) ? 1 : CONFIG.battle.seaStrength);
+        : map.cells[id].neighbors.reduce((sum, n) => (isLand(n) && cells[n].owner === c.owner ? sum + defensePowerOf(n) : sum), 0);
+    return (defensePowerOf(id) + help * 0.5) * mult * (isLand(id) ? 1 : CONFIG.battle.seaStrength);
   };
+
+  // Мир: принимает предложение, пока не побеждает с запасом; сам предлагает, если проигрывает.
+  // Долгая война утомляет — порог выше. Тех, кому предложен мир, в этом ходу не атакуем.
+  const armyOf = (p: PlayerId) => cells.reduce((sum, c, i) => sum + (c.owner === p ? attackOf(i) : 0), 0);
+  const peace = new Set<PlayerId>();
+  for (const e of proj.players) {
+    if (!e.alive || e.id === playerId || !atWar(proj, playerId, e.id)) continue;
+    const ratio = armyOf(playerId) / Math.max(1, armyOf(e.id));
+    const turns = warTurns(state, playerId, e.id);
+    const tired = turns >= 12 ? 1.5 : 1;
+    if (hasPeaceOffer(state, e.id, playerId) ? ratio < P.peaceAccept * tired : turns >= 2 && ratio < P.peaceOffer * tired) {
+      peace.add(e.id);
+    }
+  }
 
   // Ближайший враг (по шагам) — его столица последняя в списке целей.
   const myCells = cells.map((_, i) => i).filter((i) => mine(i));
@@ -116,6 +166,7 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
       if (!mine(id) || (!isLand(id) && cells[id].troops <= 0)) continue;
       for (const n of map.cells[id].neighbors) {
         if (seen.has(n) || !isLand(n) || mine(n)) continue;
+        if (cells[n].owner !== null && peace.has(cells[n].owner!)) continue;
         seen.add(n);
         const kind = cells[n].owner === null ? 0 : n === enemyCapital ? 2 : 1;
         out.push({ cell: n, kind, defense: defenseOf(n) });
@@ -143,15 +194,23 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
     return isEnemy(cells[id].owner) ? Infinity : 3;
   });
 
-  // 4. Найм у угрожаемых границ: у соседа-врага армия больше гарнизона.
-  const border = myCells.filter((id) => isLand(id) && threat(id) > cells[id].troops);
-  border.sort((a, b) => (b === me.capital ? 1 : 0) - (a === me.capital ? 1 : 0) || threat(b) - cells[b].troops - (threat(a) - cells[a].troops));
-  for (const id of border) {
-    const need = Math.ceil(threat(id) * 1.1) - cells[id].troops;
-    const gold = proj.players[playerId].gold;
-    const count = Math.min(maxRecruit(cells[id].pop), need, Math.floor(gold / CONFIG.actions.recruit.goldPerSoldier));
-    if (count > 0) tryAction({ type: 'recruit', cell: id, count });
-  }
+  // Найм: для обороны — пехота, для атаки и про запас — по характеру (кавалерия, пушки, пехота).
+  const unitFor = (purpose: 'defend' | 'attack', cell: CellId): UnitType => {
+    if (purpose === 'defend') return 'inf';
+    const r = ((state.turn * 37 + cell * 61) % 100) / 100;
+    return r < P.cav ? 'cav' : r < P.cav + P.art ? 'art' : 'inf';
+  };
+  const recruit = (cell: CellId, want: number, purpose: 'defend' | 'attack', goldShare = 1, min = 1, keepGold = 0): boolean => {
+    const unit = unitFor(purpose, cell);
+    const gold = (proj.players[playerId].gold - keepGold) * goldShare;
+    const count = Math.min(maxRecruit(cells[cell].pop), want, Math.floor(gold / CONFIG.units[unit].gold));
+    return count >= min && tryAction({ type: 'recruit', cell, count, unit });
+  };
+
+  // 4. Найм у угрожаемых границ: у соседа-врага армия сильнее гарнизона.
+  const border = myCells.filter((id) => isLand(id) && threat(id) > defensePowerOf(id));
+  border.sort((a, b) => (b === me.capital ? 1 : 0) - (a === me.capital ? 1 : 0) || threat(b) - defensePowerOf(b) - (threat(a) - defensePowerOf(a)));
+  for (const id of border) recruit(id, Math.ceil(threat(id) * 1.1 - defensePowerOf(id)), 'defend');
 
   // 5. Укрепление угрожаемых границ.
   const threatened = myCells
@@ -162,17 +221,16 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
   // Атакующий найм: если до лучшей цели не хватает немного солдат — нанять у границы.
   const available = (id: CellId) => Math.max(0, cells[id].troops - reserve(id));
   for (const t of targetsOf().slice(0, 3)) {
+    const owner = cells[t.cell].owner;
+    // Новую войну тут не начинаем — её решает атака ниже.
+    if (owner !== null && !atWar(proj, playerId, owner)) continue;
     const sources = map.cells[t.cell].neighbors.filter((n) => mine(n) && isLand(n));
     const have = sources.reduce((s, n) => s + available(n), 0);
-    const need = Math.floor(t.defense * D.attackRatio) + 1 - have;
+    const need = Math.floor(t.defense * attackRatio) + 1 - have;
     if (need <= 0 || sources.length === 0) continue;
     const src = sources.sort((a, b) => maxRecruit(cells[b].pop) - maxRecruit(cells[a].pop))[0];
-    const gold = proj.players[playerId].gold;
     // Половина золота остаётся на покупку провинций.
-    const affordable = Math.floor((gold * 0.6) / CONFIG.actions.recruit.goldPerSoldier);
-    if (need <= Math.min(maxRecruit(cells[src].pop), affordable)) {
-      tryAction({ type: 'recruit', cell: src, count: need });
-    }
+    recruit(src, need, 'attack', 0.6, need);
   }
 
   // Праздник там, где счастье близко к восстанию.
@@ -188,19 +246,29 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
     .sort((a, b) => cells[b].pop - cells[a].pop);
   for (const id of buyable) tryAction({ type: 'buy', cell: id });
 
-  // Остаток золота и ОД — в найм, ближе к фронту раньше. Запас золота — на три хода содержания,
-  // а без сухопутных соседей (остров) — ещё и на посадку самой большой армии на корабли.
+  // Запас золота — на три хода содержания, а без сухопутных соседей (остров) — ещё и на посадку
+  // самой большой армии на корабли.
   const landlocked = !myCells.some((id) => isLand(id) && map.cells[id].neighbors.some((n) => isLand(n) && !mine(n)));
   const biggest = myCells.reduce((m, id) => (isLand(id) ? Math.max(m, cells[id].troops) : m), 0);
   const keep = eco.upkeep * 3 + (landlocked ? biggest * CONFIG.move.embarkGoldPerSoldier : 0);
+
+  // Хозяйство: часть свободного золота — в развитие самых населённых спокойных провинций.
+  const devBudget = Math.max(0, proj.players[playerId].gold - keep) * P.develop;
+  let devSpent = 0;
+  const devOrder = myCells
+    .filter((id) => isLand(id) && threat(id) === 0 && developCost(cells[id].dev ?? 0) !== null)
+    .sort((a, b) => cells[b].pop - cells[a].pop);
+  for (const id of devOrder) {
+    const cost = developCost(cells[id].dev ?? 0)!;
+    if (devSpent + cost > devBudget) continue;
+    if (tryAction({ type: 'develop', cell: id })) devSpent += cost;
+  }
+
+  // Остаток золота и ОД — в найм, ближе к фронту раньше.
   const recruitOrder = myCells
     .filter((i) => isLand(i))
     .sort((a, b) => toFront[a] - toFront[b] || threat(b) - threat(a) || cells[b].pop - cells[a].pop);
-  for (const id of recruitOrder) {
-    const gold = proj.players[playerId].gold - keep;
-    const count = Math.min(maxRecruit(cells[id].pop), Math.floor(gold / CONFIG.actions.recruit.goldPerSoldier));
-    if (count >= 3) tryAction({ type: 'recruit', cell: id, count });
-  }
+  for (const id of recruitOrder) recruit(id, Infinity, 'attack', 1, 3, keep);
 
   // 3. Перемещения на оставшиеся ОД. Достижимость считаем так, будто война идёт со всеми:
   // нужную войну ИИ объявит в этом же ходу.
@@ -215,53 +283,78 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
   };
   const moves: Move[] = [];
   const wars = new Set<PlayerId>();
-  const left = cells.map((c, i) => (mine(i) ? c.troops : 0));
-  const free = (id: CellId, except: CellId | null = null) => Math.max(0, left[id] - reserve(id, except));
+  const left: Squad[] = cells.map((c, i) => (mine(i) ? squadOf(c) : { ...EMPTY_SQUAD }));
+  const free = (id: CellId, except: CellId | null = null) => Math.max(0, squadSize(left[id]) - reserve(id, except));
   let gold = proj.players[playerId].gold;
   const canMove = () => budget.ap >= CONFIG.move.ap - 1e-9;
-  const order = (from: CellId, to: CellId, count: number) => {
-    moves.push({ from, to, count });
-    left[from] -= count;
+  /**
+   * До n солдат, которые дойдут за steps шагов (по суше — у каждого типа своя дальность).
+   * В поход сначала идут кавалерия и пушки, пехота остаётся охранять.
+   */
+  const pick = (id: CellId, n: number, steps: number): Squad => {
+    const out = { ...EMPTY_SQUAD };
+    let k = n;
+    for (const t of ['cav', 'art', 'inf'] as UnitType[]) {
+      if (isLand(id) && CONFIG.units[t].range < steps) continue;
+      const take = Math.min(left[id][t], k);
+      out[t] = take;
+      k -= take;
+    }
+    return out;
+  };
+  const order = (from: CellId, to: CellId, sq: Squad) => {
+    const count = squadSize(sq);
+    moves.push({ from, to, count, ...(sq.cav ? { cav: sq.cav } : {}), ...(sq.art ? { art: sq.art } : {}) });
+    left[from] = subSquads(left[from], sq);
     budget.ap -= CONFIG.move.ap;
     if (!isLand(to) && isLand(from)) gold -= count * CONFIG.move.embarkGoldPerSoldier;
   };
-  const armyCells = () => cells.map((_, i) => i).filter((i) => mine(i) && left[i] > 0);
+  const armyCells = () => cells.map((_, i) => i).filter((i) => mine(i) && squadSize(left[i]) > 0);
 
-  // Новую войну ИИ начинает осторожно: не больше одной за ход, не на третьем фронте
-  // и только против страны, чья армия заметно слабее.
-  const armyOf = (p: PlayerId) => cells.reduce((sum, c) => sum + (c.owner === p ? c.troops : 0), 0);
-  const fronts = proj.players.filter((p) => p.alive && atWar(proj, playerId, p.id)).length;
+  // Новую войну ИИ начинает осторожно: не больше одной за ход, не больше fronts войн сразу,
+  // не во время перемирия и только против страны, чья армия слабее в warRatio раз.
+  const fronts = proj.players.filter((p) => p.alive && atWar(proj, playerId, p.id) && !peace.has(p.id)).length;
   const mayFight = (owner: PlayerId | null) =>
     owner === null ||
-    atWar(proj, playerId, owner) ||
-    wars.has(owner) ||
-    (wars.size === 0 && fronts < 2 && armyOf(playerId) >= armyOf(owner) * 1.2);
+    (!peace.has(owner) &&
+      (atWar(proj, playerId, owner) ||
+        wars.has(owner) ||
+        (wars.size === 0 && fronts < P.fronts && warError(proj, playerId, owner) === null && armyOf(playerId) >= armyOf(owner) * P.warRatio)));
 
-  // Атака с перевесом. Несколько армий идут в одну провинцию вместе.
+  // Атака с перевесом (по силе, а не по числу солдат). Несколько армий идут в одну провинцию вместе.
   for (const t of targetsOf()) {
     if (!canMove()) break;
     const owner = cells[t.cell].owner;
     if (!mayFight(owner)) continue;
-    const avail = (n: CellId) => free(n, t.cell);
-    const sources = armyCells()
-      .filter((n) => avail(n) > 0 && reach(n).get(t.cell)?.kind === 'attack')
-      .sort((a, b) => avail(b) - avail(a));
-    const total = sources.reduce((sum, n) => sum + avail(n), 0);
-    const need = t.defense > 0 ? Math.floor(t.defense * D.attackRatio) + 1 : 1;
+    const offers = armyCells()
+      .map((n) => {
+        const r = reach(n).get(t.cell);
+        if (r?.kind !== 'attack') return null;
+        const sq = pick(n, free(n, t.cell), r.path.length - 1);
+        return { n, steps: r.path.length - 1, sq, power: squadPower(sq, 'attack') };
+      })
+      .filter((x): x is { n: CellId; steps: number; sq: Squad; power: number } => x !== null && x.power > 0)
+      .sort((a, b) => b.power - a.power);
+    const total = offers.reduce((sum, x) => sum + x.power, 0);
+    const need = t.defense > 0 ? t.defense * attackRatio + 1 : 1;
     if (total < need) continue;
     // Берём с запасом, чтобы новой провинции было чем защищаться.
-    let want = Math.min(total, Math.max(need, Math.ceil(need * 1.3)));
-    const sent: [CellId, number][] = [];
-    for (const src of sources) {
+    let want = Math.min(total, Math.max(need, need * 1.3));
+    const sent: [CellId, Squad][] = [];
+    let got = 0;
+    for (const x of offers) {
       if (want <= 0 || budget.ap < CONFIG.move.ap * (sent.length + 1) - 1e-9) break;
-      const n = Math.min(avail(src), want);
-      if (n <= 0) continue;
-      sent.push([src, n]);
-      want -= n;
+      // Последней армии хватит части: берём солдат пропорционально нужной силе.
+      const part = x.power <= want ? x.sq : pick(x.n, Math.ceil((squadSize(x.sq) * want) / x.power), x.steps);
+      const power = squadPower(part, 'attack');
+      if (power <= 0) continue;
+      sent.push([x.n, part]);
+      got += power;
+      want -= power;
     }
     // Не хватило ОД собрать нужную армию — не атакуем вполсилы.
-    if (sent.reduce((sum, [, n]) => sum + n, 0) < need) continue;
-    for (const [src, n] of sent) order(src, t.cell, n);
+    if (got < need) continue;
+    for (const [src, sq] of sent) order(src, t.cell, sq);
     if (owner !== null && !atWar(proj, playerId, owner)) wars.add(owner);
   }
 
@@ -277,6 +370,8 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
     let best: CellId | null = null;
     let bestSteps = Infinity;
     for (const [to, r] of reach(id)) {
+      // Хоть кто-то из свободных должен дойти.
+      if (squadSize(pick(id, n, r.path.length - 1)) === 0) continue;
       if (r.kind === 'attack' || r.kind === 'naval') continue;
       // В море выходим только крупной армией и если хватает золота на корабли.
       if (r.kind === 'embark' && (n < 15 || gold < n * CONFIG.move.embarkGoldPerSoldier)) continue;
@@ -288,17 +383,18 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
       }
     }
     if (best === null) continue;
-    order(id, best, n);
+    order(id, best, pick(id, n, bestSteps));
   }
 
   // Страховка: отбрасываем всё, что движок счёл бы невозможным.
-  const orders: PlayerOrders = { tax, actions, moves, wars: [...wars] };
+  const orders: PlayerOrders = { tax, actions, moves, wars: [...wars], peace: [...peace] };
   const check = simulatePlan(state, playerId, orders);
   return {
     tax,
     actions: actions.filter((_, i) => check.actionErrors[i] === null),
     moves: moves.filter((_, i) => check.moveErrors[i] === null),
     wars: orders.wars!.filter((_, i) => check.warErrors[i] === null),
+    peace: orders.peace!.filter((_, i) => check.peaceErrors[i] === null),
   };
 }
 

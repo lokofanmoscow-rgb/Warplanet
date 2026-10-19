@@ -84,7 +84,13 @@ export function own(state: GameState, cell: number, owner: number | null, troops
 }
 
 export function orders(partial: Partial<PlayerOrders> & { tax?: number }): PlayerOrders {
-  return { tax: partial.tax ?? 0, actions: partial.actions ?? [], moves: partial.moves ?? [], wars: partial.wars ?? [] };
+  return {
+    tax: partial.tax ?? 0,
+    actions: partial.actions ?? [],
+    moves: partial.moves ?? [],
+    wars: partial.wars ?? [],
+    peace: partial.peace ?? [],
+  };
 }
 
 export function ordersFor(state: GameState, map: Record<number, Partial<PlayerOrders>>): OrdersByPlayer {

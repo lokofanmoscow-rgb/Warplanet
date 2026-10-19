@@ -1,18 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createGame, getMap, resolveTurn } from '../../engine';
 import { planAllAI } from '../../ai/planOrders';
 import { continueSaved } from '../../game/sessions';
-import { getPlayerName, loadGame, setPlayerName, type SaveData } from '../../game/storage';
+import { clearSave, getPlayerName, listSaves, loadSave, setPlayerName, type SaveMeta } from '../../game/storage';
 import { DEFAULT_MAP_ID } from '../../maps';
 import { networkAvailable } from '../../net/platform';
-import { Button, Panel, T, Title } from '../components';
+import { Button, Panel, Swatch, T, Title } from '../components';
+import { Overlay } from '../game/Dialogs';
+import { Icon } from '../icons';
 import { MapView } from '../map/MapView';
 import { useNav } from '../nav';
 import { COLORS, FONTS, useLayout } from '../theme';
 
-const MODE_LABEL: Record<SaveData['mode'], string> = {
+const MODE_LABEL: Record<SaveMeta['mode'], string> = {
   ai: 'против ИИ',
   hotseat: 'на одном телефоне',
   host: 'по Wi-Fi',
@@ -38,27 +40,39 @@ export function MainMenu() {
   const insets = useSafeAreaInsets();
   const demo = useDemoGame();
   const map = getMap(demo.mapId);
-  const [save, setSave] = useState<SaveData | null>(null);
+  const [saves, setSaves] = useState<SaveMeta[]>([]);
+  const [savesOpen, setSavesOpen] = useState(false);
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadGame().then(setSave);
+    void listSaves().then(setSaves);
     void getPlayerName().then(setName);
   }, []);
 
-  const onContinue = async () => {
-    if (!save) return;
+  const open = async (meta: SaveMeta) => {
+    setSavesOpen(false);
     setLoading(true);
     setError(null);
     try {
+      const save = await loadSave(meta.id);
+      if (!save) throw new Error('Сохранение не читается');
       const controller = await continueSaved(save);
       go({ name: 'game', controller });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось продолжить партию');
       setLoading(false);
     }
+  };
+  // Одна партия — сразу в неё, несколько — список.
+  const onContinue = () => {
+    if (saves.length === 1) void open(saves[0]);
+    else if (saves.length > 1) setSavesOpen(true);
+  };
+  const remove = async (meta: SaveMeta) => {
+    await clearSave(meta.id);
+    setSaves(await listSaves());
   };
 
   const compact = height < 520;
@@ -92,9 +106,15 @@ export function MainMenu() {
             <Button small={compact} label="На одном телефоне" icon="people" onPress={() => go({ name: 'setup', mode: 'hotseat' })} />
             <Button
               small={compact}
-              label={save ? `Продолжить · ход ${save.game.turn}, ${MODE_LABEL[save.mode]}` : 'Продолжить'}
+              label={
+                saves.length === 1
+                  ? `Продолжить · ход ${saves[0].turn}, ${MODE_LABEL[saves[0].mode]}`
+                  : saves.length > 1
+                    ? `Продолжить · ${saves.length} партии`
+                    : 'Продолжить'
+              }
               icon="log"
-              disabled={!save || loading}
+              disabled={saves.length === 0 || loading}
               onPress={onContinue}
             />
             {loading && <ActivityIndicator color={COLORS.gold} />}
@@ -126,7 +146,61 @@ export function MainMenu() {
           </View>
         </Panel>
       </ScrollView>
+      {savesOpen && <SavesDialog saves={saves} onOpen={(m) => void open(m)} onDelete={(m) => void remove(m)} onClose={() => setSavesOpen(false)} />}
     </View>
+  );
+}
+
+/** Список сохранённых партий: продолжить или удалить. */
+function SavesDialog({
+  saves,
+  onOpen,
+  onDelete,
+  onClose,
+}: {
+  saves: SaveMeta[];
+  onOpen: (m: SaveMeta) => void;
+  onDelete: (m: SaveMeta) => void;
+  onClose: () => void;
+}) {
+  const { s } = useLayout();
+  const date = (t: number) => {
+    const d = new Date(t);
+    return `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  return (
+    <Overlay onDismiss={onClose} maxWidth={480}>
+      <Title size={22}>Сохранённые партии</Title>
+      <ScrollView style={{ marginVertical: 10 * s, flexShrink: 1 }} contentContainerStyle={{ gap: 8 * s }}>
+        {saves.map((m) => (
+          <View key={m.id} style={[styles.saveRow, { gap: 8 * s, padding: 8 * s, borderRadius: 8 * s }]}>
+            <Pressable accessibilityRole="button" onPress={() => onOpen(m)} style={{ flex: 1, gap: 3 * s }}>
+              <T bold>
+                {getMap(m.mapId).name} · ход {m.turn}
+              </T>
+              <T dim size={12}>
+                {MODE_LABEL[m.mode]} · {date(m.savedAt)}
+              </T>
+              <View style={[styles.swatches, { gap: 4 * s }]}>
+                {m.players.map((p, i) => (
+                  <View key={i} style={{ opacity: p.alive ? 1 : 0.3 }}>
+                    <Swatch color={p.color} size={p.human ? 14 : 10} />
+                  </View>
+                ))}
+              </View>
+            </Pressable>
+            <Button small label="Играть" variant="primary" onPress={() => onOpen(m)} />
+            <Pressable accessibilityRole="button" accessibilityLabel="Удалить партию" onPress={() => onDelete(m)} hitSlop={8} style={{ padding: 4 * s }}>
+              <Icon name="close" size={18 * s} color={COLORS.danger} />
+            </Pressable>
+          </View>
+        ))}
+      </ScrollView>
+      <T dim size={11} style={{ marginBottom: 8 * s }}>
+        Хранится до 6 партий: при новой самая давняя удаляется.
+      </T>
+      <Button label="Закрыть" onPress={onClose} />
+    </Overlay>
   );
 }
 
@@ -141,6 +215,8 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  saveRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.panelDeep, borderWidth: 1, borderColor: COLORS.goldDark },
+  swatches: { flexDirection: 'row', alignItems: 'center' },
   input: {
     flex: 1,
     color: COLORS.text,

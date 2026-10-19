@@ -16,7 +16,7 @@ import { saveGame, type SavedMode } from './storage';
 
 export type Mode = 'ai' | 'hotseat' | 'host' | 'client';
 
-type Edit = { kind: 'action' } | { kind: 'move' } | { kind: 'war' };
+type Edit = { kind: 'action' } | { kind: 'move' } | { kind: 'war' } | { kind: 'peace' };
 
 /**
  * Партия на этом устройстве в любом режиме. Интерфейс видит одно и то же:
@@ -120,7 +120,7 @@ export class MatchController {
   orders(id: PlayerId = this.active): PlayerOrders {
     let d = this.drafts.get(id);
     if (!d) {
-      d = { tax: this.game.players[id]?.tax ?? 0, actions: [], moves: [], wars: [] };
+      d = { tax: this.game.players[id]?.tax ?? 0, actions: [], moves: [], wars: [], peace: [] };
       this.drafts.set(id, d);
     }
     return d;
@@ -178,10 +178,15 @@ export class MatchController {
     if (!this.canEdit()) return 'Приказы уже отданы';
     const o = this.orders();
     const idx = o.moves.findIndex((m) => m.from === move.from && m.to === move.to);
-    const moves = idx >= 0 ? o.moves.map((m, i) => (i === idx ? { ...m, count: m.count + move.count } : m)) : [...o.moves, move];
+    const merge = (m: Move): Move => {
+      const cav = (m.cav ?? 0) + (move.cav ?? 0);
+      const art = (m.art ?? 0) + (move.art ?? 0);
+      return { from: m.from, to: m.to, count: m.count + move.count, ...(cav ? { cav } : {}), ...(art ? { art } : {}) };
+    };
+    const moves = idx >= 0 ? o.moves.map((m, i) => (i === idx ? merge(m) : m)) : [...o.moves, move];
     const err = this.trial({ ...o, moves }, (p) => p.moveErrors[idx >= 0 ? idx : moves.length - 1]);
     if (err) return err;
-    if (idx >= 0) o.moves[idx].count += move.count;
+    if (idx >= 0) o.moves[idx] = moves[idx];
     else {
       o.moves.push(move);
       this.edits.push({ kind: 'move' });
@@ -220,6 +225,27 @@ export class MatchController {
     this.emit();
   }
 
+  /** Предложение мира (или согласие на чужое предложение). Мир будет, если другая сторона тоже согласна. */
+  offerPeace(target: PlayerId): string | null {
+    if (!this.canEdit()) return 'Приказы уже отданы';
+    const o = this.orders();
+    const peace = [...(o.peace ?? []), target];
+    const err = this.trial({ ...o, peace }, (p) => p.peaceErrors.at(-1) ?? null);
+    if (err) return err;
+    o.peace = peace;
+    this.edits.push({ kind: 'peace' });
+    this.emit();
+    return null;
+  }
+
+  cancelPeace(target: PlayerId): void {
+    if (!this.canEdit()) return;
+    const o = this.orders();
+    o.peace = (o.peace ?? []).filter((t) => t !== target);
+    this.dropEdit('peace');
+    this.emit();
+  }
+
   /** После отмены приказа убираем те, что без него стали невозможны (например, атаку без войны). */
   private prune(): void {
     const o = this.orders();
@@ -239,16 +265,18 @@ export class MatchController {
     if (last?.kind === 'move') o.moves.pop();
     else if (last?.kind === 'action') o.actions.pop();
     else if (last?.kind === 'war') o.wars?.pop();
+    else if (last?.kind === 'peace') o.peace?.pop();
     else if (o.moves.length) o.moves.pop();
     else if (o.actions.length) o.actions.pop();
-    else o.wars?.pop();
+    else if (o.wars?.length) o.wars.pop();
+    else o.peace?.pop();
     this.prune();
     this.emit();
   }
 
   get canUndo(): boolean {
     const o = this.orders();
-    return this.canEdit() && (o.moves.length > 0 || o.actions.length > 0 || (o.wars?.length ?? 0) > 0);
+    return this.canEdit() && (o.moves.length > 0 || o.actions.length > 0 || (o.wars?.length ?? 0) > 0 || (o.peace?.length ?? 0) > 0);
   }
 
   private dropEdit(kind: Edit['kind']): void {

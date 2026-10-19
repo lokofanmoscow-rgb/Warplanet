@@ -121,6 +121,7 @@ describe('экономика', () => {
 
   test('счастье растёт на 5 за ход, а падает на треть разрыва', () => {
     const s = blankState(map);
+    s.wars = [];
     own(s, 0, 0);
     s.cells[0].happiness = 70;
     s.players[0].tax = 90; // цель 19, разрыв 51 → −18
@@ -139,6 +140,7 @@ describe('экономика', () => {
     const s = blankState(map);
     own(s, 0, 0, 0);
     own(s, 5, 1, 0);
+    s.wars = [];
     s.cells[0].pop = 10000;
     s.cells[0].happiness = 70;
     s.players[0].tax = 0;

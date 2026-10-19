@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CONFIG, getMap, isPeaceful, moveBlockReason, reachable, visibleCells, type CellId, type MoveKind } from '../../engine';
+import { CONFIG, EMPTY_SQUAD, getMap, isPeaceful, moveBlockReason, reachable, squadSize, visibleCells, type CellId, type MoveKind, type PlayerId, type Squad } from '../../engine';
 import type { MatchController } from '../../game/controller';
 import { clearSave } from '../../game/storage';
 import { Button, Panel, RoundButton, T } from '../components';
 import { newsFor, type NewsItem } from '../describe';
-import { EndTurnDialog, GameMenu, HandoffScreen, LogDialog, MoveDialog, NewsDialog, TaxDialog } from '../game/Dialogs';
+import { EndTurnDialog, GameMenu, HandoffScreen, LogDialog, MoveDialog, NewsDialog, PeaceOfferDialog, TaxDialog } from '../game/Dialogs';
 import { ProvincePanel } from '../game/ProvincePanel';
 import { TopBar } from '../game/TopBar';
 import { Icon } from '../icons';
@@ -53,6 +53,8 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  // Предложения мира, на которые уже ответили «Отклонить» (ход:игрок:от кого).
+  const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [focus, setFocus] = useState<CellId | null>(me?.capital ?? null);
   const [now, setNow] = useState(Date.now());
@@ -125,7 +127,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
 
   const exit = useCallback(() => {
     // Выбывший хост уходит насовсем: партию доигрывает второй телефон, продолжать здесь нечего.
-    if (c.mode === 'host' && !c.game.players[c.active]?.alive) void clearSave();
+    if (c.mode === 'host' && !c.game.players[c.active]?.alive) void clearSave(c.game.id);
     c.dispose();
     go({ name: 'menu' });
   }, [c, go]);
@@ -153,7 +155,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   const finishedSeen = game.finished && !logOpen && !replay && !news;
   useEffect(() => {
     if (!finishedSeen) return;
-    void clearSave();
+    void clearSave(game.id);
     const viewer = c.localPlayers()[0] ?? null;
     const t = setTimeout(() => {
       c.dispose();
@@ -250,8 +252,9 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   };
 
   /** Приказ принят — армия сразу идёт по пути на карте. */
-  const sendMove = (from: CellId, to: CellId, count: number) => {
-    const err = c.addMove({ from, to, count });
+  const sendMove = (from: CellId, to: CellId, squad: Squad) => {
+    const count = squadSize(squad);
+    const err = c.addMove({ from, to, count, ...(squad.cav ? { cav: squad.cav } : {}), ...(squad.art ? { art: squad.art } : {}) });
     if (err) {
       setToast(err);
       return;
@@ -310,6 +313,21 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
       />
     ) : null;
 
+  // Предложение мира — после новостей и показа боёв, по одному.
+  const offerFrom =
+    editable && !replay && !news && !logOpen && !c.notice
+      ? (game.peaceOffers ?? []).find(
+          ([from, to]) => to === player && !answered.has(`${game.turn}:${player}:${from}`) && !(orders.peace ?? []).includes(from),
+        )?.[0]
+      : undefined;
+  const answerOffer = (from: PlayerId, accept: boolean) => {
+    if (accept) {
+      const err = c.offerPeace(from);
+      if (err) setToast(err);
+    }
+    setAnswered((prev) => new Set(prev).add(`${game.turn}:${player}:${from}`));
+  };
+
   // «Готово» видно, только когда на экране нет панелей и окон — чтобы не нажать его случайно.
   const windowOpen =
     panel !== null ||
@@ -321,6 +339,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     menuOpen ||
     news !== null ||
     c.notice !== null ||
+    offerFrom !== undefined ||
     confirmEnd;
 
   return (
@@ -470,11 +489,11 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
           to={moveDialog.to}
           kind={moveDialog.kind}
           steps={moveDialog.steps}
-          available={plan.available[moveDialog.from] ?? 0}
+          available={plan.availableUnits[moveDialog.from] ?? EMPTY_SQUAD}
           goldLeft={plan.goldLeft}
           onCancel={() => setMoveDialog(null)}
-          onConfirm={(count) => {
-            sendMove(moveDialog.from, moveDialog.to, count);
+          onConfirm={(squad) => {
+            sendMove(moveDialog.from, moveDialog.to, squad);
             setMoveDialog(null);
             setMoveFrom(null);
           }}
@@ -513,6 +532,9 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
         />
       )}
       {news && <NewsDialog war={news.war} items={news.items} onClose={closeNews} />}
+      {offerFrom !== undefined && (
+        <PeaceOfferDialog from={game.players[offerFrom].name} onAccept={() => answerOffer(offerFrom, true)} onReject={() => answerOffer(offerFrom, false)} />
+      )}
       {/* Сообщение контроллера (хост вышел — доигрываем здесь) — окном с кнопкой «ОК». */}
       {c.notice && !news && <NewsDialog war={false} items={[{ text: c.notice, bad: false }]} onClose={() => c.dismissNotice()} />}
       {c.handoff !== null && !logOpen && !replay && !news && !game.finished && <HandoffScreen game={game} player={c.handoff} onReady={() => c.takeOver()} />}

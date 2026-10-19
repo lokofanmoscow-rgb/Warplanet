@@ -1,5 +1,6 @@
 import { CONFIG } from './config';
-import type { Action, ActionType, CellId, GameState, MapDef, PlayerId, TurnEvent } from './types';
+import type { Action, ActionType, CellId, GameState, MapDef, PlayerId, TurnEvent, UnitType } from './types';
+import { setSquad, squadOf } from './units';
 
 const A = CONFIG.actions;
 
@@ -9,6 +10,7 @@ export const ACTION_AP: Record<ActionType, number> = {
   buy: A.buy.ap,
   loot: A.loot.ap,
   festival: A.festival.ap,
+  develop: A.develop.ap,
 };
 
 export function ownedLandCount(state: GameState, map: MapDef, playerId: PlayerId): number {
@@ -41,10 +43,21 @@ export function festivalCost(pop: number): number {
   return Math.max(A.festival.minGold, Math.ceil(pop / A.festival.popPerGold));
 }
 
+/** Цена следующего уровня хозяйства (null — уже наивысший). */
+export function developCost(level: number): number | null {
+  return level < CONFIG.economy.devMax ? A.develop.gold[level] : null;
+}
+
+export function unitOf(action: { unit?: UnitType }): UnitType {
+  return action.unit === 'cav' || action.unit === 'art' ? action.unit : 'inf';
+}
+
 export function actionGold(state: GameState, action: Action): number {
   switch (action.type) {
     case 'recruit':
-      return action.count * A.recruit.goldPerSoldier;
+      return action.count * CONFIG.units[unitOf(action)].gold;
+    case 'develop':
+      return developCost(state.cells[action.cell].dev ?? 0) ?? 0;
     case 'fortify':
       return A.fortify.gold;
     case 'buy':
@@ -69,8 +82,9 @@ export function newBudget(state: GameState, map: MapDef, playerId: PlayerId): Ac
   return { ap: actionPoints(state, map, playerId), count: 0, used: new Set() };
 }
 
+/** Одно действие каждого вида на провинцию за ход; найм — отдельно для каждого типа войск. */
 export function actionKey(action: Action): string {
-  return `${action.type}:${action.cell}`;
+  return action.type === 'recruit' ? `recruit:${action.cell}:${unitOf(action)}` : `${action.type}:${action.cell}`;
 }
 
 /** Почему действие сейчас невозможно; null — можно. */
@@ -120,6 +134,11 @@ export function actionError(
       if (cell.happiness >= 100) return 'Счастье уже 100%';
       return null;
     }
+    case 'develop': {
+      if (cell.owner !== playerId) return 'Развивать можно только свою провинцию';
+      if (developCost(cell.dev ?? 0) === null) return 'Хозяйство уже развито до предела';
+      return null;
+    }
   }
 }
 
@@ -143,10 +162,18 @@ export function applyAction(
   budget.used.add(actionKey(action));
 
   switch (action.type) {
-    case 'recruit':
-      cell.troops += action.count;
+    case 'recruit': {
+      const unit = unitOf(action);
+      const squad = squadOf(cell);
+      squad[unit] += action.count;
+      setSquad(cell, squad);
       cell.pop -= action.count * A.recruit.popPerSoldier;
-      log?.push({ t: 'recruit', player: playerId, cell: action.cell, count: action.count });
+      log?.push({ t: 'recruit', player: playerId, cell: action.cell, count: action.count, unit });
+      break;
+    }
+    case 'develop':
+      cell.dev = (cell.dev ?? 0) + 1;
+      log?.push({ t: 'develop', player: playerId, cell: action.cell, level: cell.dev });
       break;
     case 'fortify':
       cell.fortified = true;
@@ -154,7 +181,7 @@ export function applyAction(
       break;
     case 'buy':
       cell.owner = playerId;
-      if (!CONFIG.neutral.buyKeepsMilitia) cell.troops = 0;
+      if (!CONFIG.neutral.buyKeepsMilitia) setSquad(cell, { inf: 0, cav: 0, art: 0 });
       log?.push({ t: 'buy', player: playerId, cell: action.cell, cost: gold });
       break;
     case 'loot': {

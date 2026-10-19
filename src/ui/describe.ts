@@ -1,4 +1,4 @@
-import { CONFIG, type EndReason, type GameState, type MapDef, type PlayerId, type TurnEvent } from '../engine';
+import { CONFIG, type EndReason, type GameState, type MapDef, type PlayerId, type Squad, type TurnEvent } from '../engine';
 
 export function plural(n: number, one: string, few: string, many: string): string {
   const a = Math.abs(n) % 100;
@@ -13,6 +13,14 @@ export function fmt(n: number): string {
   return Math.round(n)
     .toString()
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+/** Состав армии: «пех. 20 · кав. 6 · арт. 4» (только те типы, что есть). */
+export function fmtSquad(s: Squad): string {
+  return (['inf', 'cav', 'art'] as const)
+    .filter((t) => s[t] > 0)
+    .map((t) => `${CONFIG.units[t].short} ${s[t]}`)
+    .join(' · ');
 }
 
 /** ОД бывают дробными: 4.5. */
@@ -64,7 +72,25 @@ export function describeLog(
         break;
       // Формулировки без склонения названий: «Покупка — Вена: Италия».
       case 'recruit':
-        if (mine(e.player)) lines.push({ text: `Найм — ${cell(e.cell)}: +${e.count} солдат`, player: e.player, kind: 'info' });
+        if (mine(e.player)) {
+          const what = CONFIG.units[e.unit ?? 'inf'].label.toLowerCase();
+          lines.push({ text: `Найм — ${cell(e.cell)}: +${e.count} (${what})`, player: e.player, kind: 'info' });
+        }
+        break;
+      case 'develop':
+        if (mine(e.player)) lines.push({ text: `Хозяйство — ${cell(e.cell)}: уровень ${e.level}`, player: e.player, kind: 'good' });
+        break;
+      case 'peaceOffer':
+        if (mine(e.player) || mine(e.target)) {
+          lines.push({ text: `Мир: ${name(e.player)} предлагает мир стране «${name(e.target)}»`, player: e.player, kind: 'info' });
+        }
+        break;
+      case 'peace':
+        lines.push({
+          text: `Мир: ${name(e.a)} и ${name(e.b)} заключили мир (перемирие до хода ${e.until})`,
+          player: null,
+          kind: mine(e.a) || mine(e.b) ? 'good' : 'info',
+        });
         break;
       case 'fortify':
         if (mine(e.player)) lines.push({ text: `Укрепление — ${cell(e.cell)}`, player: e.player, kind: 'info' });
@@ -149,6 +175,10 @@ export function newsFor(game: GameState, map: MapDef, viewers: PlayerId[]): { wa
     if (e.t === 'war' && viewers.includes(e.target)) {
       war = true;
       items.push({ text: one ? `«${name(e.player)}» объявляет вам войну!` : `«${name(e.player)}» объявляет войну стране «${name(e.target)}»`, bad: true });
+    }
+    if (e.t === 'peace' && (viewers.includes(e.a) || viewers.includes(e.b))) {
+      const other = viewers.includes(e.a) ? e.b : e.a;
+      items.push({ text: `Заключён мир с «${name(other)}». Перемирие до хода ${e.until}: войну друг другу не объявить.`, bad: false });
     }
     if (e.t === 'revolt' && viewers.includes(e.player)) {
       const where = map.cells[e.cell]?.name ?? '?';

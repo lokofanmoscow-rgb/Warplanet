@@ -1,42 +1,13 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Canvas, Group, Path, Rect, Skia } from '@shopify/react-native-skia';
 import { getMap, ownedLandCount, type GameState } from '../../engine';
 import type { Mode } from '../../game/controller';
 import { Button, Panel, Swatch, T, Title } from '../components';
 import { END_REASON } from '../describe';
 import { useNav } from '../nav';
 import { COLORS, useLayout } from '../theme';
-
-/** График числа провинций по ходам. */
-function HistoryChart({ game, width, height }: { game: GameState; width: number; height: number }) {
-  const paths = useMemo(() => {
-    const h = game.history;
-    const max = Math.max(1, ...h.flat());
-    const n = Math.max(1, h.length - 1);
-    return game.players.map((p) => {
-      const b = Skia.PathBuilder.Make();
-      h.forEach((row, i) => {
-        const x = (i / n) * width;
-        const y = height - (row[p.id] / max) * (height - 6) - 3;
-        if (i === 0) b.moveTo(x, y);
-        else b.lineTo(x, y);
-      });
-      return { color: p.color, path: b.build() };
-    });
-  }, [game, width, height]);
-  return (
-    <Canvas style={{ width, height }}>
-      <Rect x={0} y={0} width={width} height={height} color={COLORS.panelDeep} />
-      <Group>
-        {paths.map((p, i) => (
-          <Path key={i} path={p.path} color={p.color} style="stroke" strokeWidth={2.5} strokeJoin="round" />
-        ))}
-      </Group>
-    </Canvas>
-  );
-}
+import { StatsChart } from './StatsChart';
 
 export function ResultsScreen({ game, viewer }: { game: GameState; mode: Mode; viewer: number | null }) {
   const { go } = useNav();
@@ -48,7 +19,7 @@ export function ResultsScreen({ game, viewer }: { game: GameState; mode: Mode; v
   const rows = [...game.players].sort(
     (a, b) => ownedLandCount(game, map, b.id) - ownedLandCount(game, map, a.id) || Number(b.alive) - Number(a.alive),
   );
-  const chartW = Math.min(520 * s, width - 80);
+  const chartW = Math.min(560 * s, width - 60);
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.center, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
@@ -73,11 +44,11 @@ export function ResultsScreen({ game, viewer }: { game: GameState; mode: Mode; v
           ))}
         </View>
         {game.history.length > 1 && (
-          <View style={{ alignItems: 'center', gap: 6 * s, marginBottom: 16 * s }}>
-            <T dim size={13}>
-              Провинции по ходам
+          <View style={{ gap: 6 * s, marginBottom: 16 * s }}>
+            <T bold size={14} style={{ color: COLORS.goldLight }}>
+              Ход партии
             </T>
-            <HistoryChart game={game} width={chartW} height={140 * s} />
+            <StatsChart game={game} width={chartW} height={170 * s} />
           </View>
         )}
         <Button label="В главное меню" variant="primary" onPress={() => go({ name: 'menu' })} />

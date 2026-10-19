@@ -39,7 +39,7 @@ describe('перемещения', () => {
     expect(reachable(s, map, 0, 0).get(4)).toEqual({ kind: 'march', path: [0, 1, 2, 3, 4] });
     const plan = simulatePlan(s, 0, orders({ tax: 60, moves: [{ from: 0, to: 4, count: 10 }, { from: 0, to: 5, count: 1 }] }));
     expect(plan.moveErrors[0]).toBeNull();
-    expect(plan.moveErrors[1]).toMatch(/не дальше 4/);
+    expect(plan.moveErrors[1]).toMatch(/пехота — до 4/);
     expect(plan.projected.cells[4].troops).toBe(10);
     expect(plan.projected.cells[0].troops).toBe(10);
     expect(plan.available[4]).toBe(0);
