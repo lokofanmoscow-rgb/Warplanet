@@ -26,7 +26,7 @@ import {
   WaterRipple,
 } from './layers';
 import { useSpriteImages } from './sprites';
-import { BASE_RES, StaticMap, type DetailRequest } from './StaticMap';
+import { baseRes, StaticMap, type DetailRequest } from './StaticMap';
 import {
   borderPos,
   frameRect,
@@ -131,7 +131,7 @@ export function MapView(props: MapViewProps) {
         const z = sc.value;
         const ps = z * PixelRatio.get();
         const labels = z >= 0.55;
-        if (ps <= BASE_RES * 1.15 && !labels) return setDetail(null);
+        if (ps <= baseRes(map) * 1.15 && !labels) return setDetail(null);
         // Видимая область плюс поля на случай прокрутки.
         const vx = -tx.value / z;
         const vy = -ty.value / z;

@@ -10,8 +10,13 @@ import type { SpriteImages } from './sprites';
 // а один раз в картинку: целиком для обзора и отдельно — видимая область в разрешении экрана при приближении.
 // В кадре остаются только картинки, анимированная вода, выделение, плашки и стрелки.
 
-/** Разрешение общей картинки: пикселей на единицу карты. */
-export const BASE_RES = 1.5;
+/**
+ * Разрешение общей картинки: пикселей на единицу карты. Обычно 1,5; у больших карт (мир, Россия)
+ * меньше, чтобы картинка была не больше ~3300 точек по стороне — столько тянет любая видеокарта.
+ */
+export function baseRes(map: { width: number; height: number }): number {
+  return Math.min(1.5, 3300 / Math.max(map.width, map.height));
+}
 
 export interface DetailRequest {
   x0: number;
@@ -63,6 +68,7 @@ export const StaticMap = React.memo(function StaticMap({
   const { geo } = p;
   const W = geo.map.width;
   const H = geo.map.height;
+  const res = baseRes(geo.map);
   const [base, setBase] = useState<SkImage | null>(null);
   const [baseFailed, setBaseFailed] = useState(false);
   const [detailImg, setDetailImg] = useState<{ img: SkImage; req: DetailRequest } | null>(null);
@@ -72,10 +78,10 @@ export const StaticMap = React.memo(function StaticMap({
   useEffect(() => {
     let alive = true;
     renderImage(
-      <Group transform={[{ scale: BASE_RES }]}>
+      <Group transform={[{ scale: res }]}>
         <StaticContent {...p} />
       </Group>,
-      { width: Math.round(W * BASE_RES), height: Math.round(H * BASE_RES) },
+      { width: Math.round(W * res), height: Math.round(H * res) },
     )
       .then((img) => {
         if (!alive) return;

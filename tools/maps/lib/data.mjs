@@ -13,6 +13,8 @@ const SOURCES = {
   ne_10m_populated_places: 'cultural',
   // Озёра — чтобы вырезать Великие озёра из штатов США.
   ne_10m_lakes: 'physical',
+  // Моря и заливы — названия морских зон на картах с autoSeas.
+  ne_10m_geography_marine_polys: 'physical',
 };
 
 export function shp(name) {

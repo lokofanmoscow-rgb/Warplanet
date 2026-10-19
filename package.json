@@ -43,7 +43,7 @@
     "web": "setup-skia-web && expo start --web",
     "test": "jest",
     "typecheck": "tsc --noEmit",
-    "maps": "node tools/maps/build.mjs europe && node tools/maps/build.mjs africa && node tools/maps/build.mjs usa",
+    "maps": "node tools/maps/build.mjs europe && node tools/maps/build.mjs africa && node tools/maps/build.mjs usa && node tools/maps/build.mjs russia && node tools/maps/build.mjs world",
     "postinstall": "node tools/gen-assets.mjs",
     "assets": "node tools/gen-assets.mjs"
   },

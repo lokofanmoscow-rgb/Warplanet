@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { geoAzimuthalEqualArea, geoConicConformal } from 'd3-geo';
+import { geoAzimuthalEqualArea, geoConicConformal, geoEquirectangular, geoNaturalEarth1 } from 'd3-geo';
 import { Delaunay } from 'd3-delaunay';
 import mapshaper from 'mapshaper';
 import polylabel from 'polylabel';
@@ -70,26 +70,55 @@ async function loadPlay(list, clip, files = {}) {
     `-i ${shp('ne_10m_admin_1_states_provinces')} name=play ` +
       `-each ${q(mergeExpr)} ` +
       `-filter ${q(`${q(list)}.indexOf(adm0_a3) > -1`)} ` +
-      `-clip ${clip} ` +
+      (clip ? `-clip ${clip} ` : '') +
       (lakes ? '-erase lakes.json ' : '') +
       `-filter-islands min-area=${cfg.minIslandKm2}km2 remove-empty ` +
       `-filter-fields adm0_a3,name,name_ru ` +
       `-o format=geojson precision=0.000001 play.json`,
     lakes ? { ...files, 'lakes.json': lakes } : files,
   );
-  return play.features.filter((f) => f.geometry && geometryArea(f.geometry) > 0);
+  return play.features
+    .filter((f) => f.geometry && geometryArea(f.geometry) > 0)
+    .map(wrap)
+    .filter((f) => f.geometry);
+}
+
+// Страна через 180-й меридиан (Чукотка): части западнее wrapLon сдвигаются на +360°, чтобы карта
+// была непрерывной. Тогда и обрезка рамкой не нужна (noClip) — страна целиком внутри карты.
+// На карте мира наоборот: кусок Чукотки за 180° (trimParts) просто убирается.
+function wrap(f) {
+  const trim = (cfg.trimParts ?? []).find((t) => t.country === f.properties.adm0_a3);
+  if (trim) {
+    const g = f.geometry;
+    const keep = (poly) => poly[0].some((p) => p[0] >= trim.minLon);
+    const polys = (g.type === 'Polygon' ? [g.coordinates] : g.coordinates).filter(keep);
+    if (!polys.length) return { ...f, geometry: null };
+    f = { ...f, geometry: { type: 'MultiPolygon', coordinates: polys } };
+  }
+  if (cfg.wrapLon === undefined) return f;
+  const shift = (ring) => (ring.some((p) => p[0] < cfg.wrapLon) ? ring.map(([x, y]) => [x < 0 ? x + 360 : x, y]) : ring);
+  const g = f.geometry;
+  const geometry =
+    g.type === 'Polygon'
+      ? { type: 'Polygon', coordinates: g.coordinates.map(shift) }
+      : { type: 'MultiPolygon', coordinates: g.coordinates.map((poly) => poly.map(shift)) };
+  return { ...f, geometry };
 }
 
 // Сначала регионы в прямоугольнике долгот и широт bbox — по ним считаются проекция и размер карты.
 // Затем играбельной становится вся суша этих стран внутри прямоугольника карты: без косого
 // среза по меридиану и серой «ничейной» земли у края.
-const preRegions = await loadPlay(cfg.frameCountries ?? cfg.countries, `bbox=${cfg.bbox.join(',')}`);
+const preRegions = await loadPlay(cfg.frameCountries ?? cfg.countries, cfg.noClip ? null : `bbox=${cfg.bbox.join(',')}`);
 
-// Коническая подходит для средних широт (Европа); у экватора — азимутальная равновеликая.
+// Коническая подходит для средних широт (Европа); у экватора — азимутальная равновеликая; мир — Natural Earth.
 const projection = (
   cfg.projection.type === 'azimuthalEqualArea'
     ? geoAzimuthalEqualArea()
-    : geoConicConformal().parallels(cfg.projection.parallels)
+    : cfg.projection.type === 'equirectangular'
+      ? geoEquirectangular()
+      : cfg.projection.type === 'naturalEarth'
+        ? geoNaturalEarth1()
+        : geoConicConformal().parallels(cfg.projection.parallels)
 )
   .rotate(cfg.projection.rotate)
   .scale(1000)
@@ -126,7 +155,9 @@ for (let i = 1; i <= STEPS; i++) frameLonLat.push(projection.invert([0, H - (H *
 const frame = { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [frameLonLat.reverse()] } }] };
 
 for (const [t, xy] of [['СЗ', [0, 0]], ['С', [W / 2, 0]], ['СВ', [W, 0]], ['З', [0, H / 2]], ['В', [W, H / 2]], ['ЮЗ', [0, H]], ['Ю', [W / 2, H]], ['ЮВ', [W, H]]]) log(`   угол ${t}: ${projection.invert(xy).map((v) => v.toFixed(1)).join(', ')}`);
-const regions = await loadPlay(cfg.countries, 'frame.json', { 'frame.json': frame });
+let regions = await loadPlay(cfg.countries, cfg.noClip ? null : 'frame.json', { 'frame.json': frame });
+// Исключённые регионы (спорные территории).
+regions = regions.filter((r) => !(cfg.excludeRegions ?? []).includes(r.properties.name));
 log(`   регионов: ${regions.length}`);
 
 // Площадь в км² (геодезически приблизительно).
@@ -151,6 +182,70 @@ for (const r of regions) {
   r.area = areaKm2(r.geometry);
   const c = mainCentroid(r.geometry);
   r.lonlat = c;
+}
+// Обрывки без имени и крошечные кусочки.
+if (cfg.minRegionKm2) regions = regions.filter((r) => r.properties.name && r.area >= cfg.minRegionKm2);
+
+// Деление огромных регионов (Якутия, Красноярский край): диаграмма Вороного по заданным точкам
+// в плоских координатах карты, каждая ячейка вырезает свою часть региона.
+function ringArea(ring) {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += (ring[j][0] - ring[i][0]) * (ring[j][1] + ring[i][1]);
+  return a / 2;
+}
+const frameSign = Math.sign(ringArea(frame.features[0].geometry.coordinates[0]));
+for (const sp of cfg.splits ?? []) {
+  const i = regions.findIndex((r) => r.properties.name === sp.region);
+  if (i < 0) {
+    log(`   ! деление: нет региона ${sp.region}`);
+    continue;
+  }
+  const r = regions[i];
+  const seeds = sp.seeds.map((p) => projection(p));
+  const pts = rings(r.geometry).flat().map((p) => projection(p));
+  const bb = [
+    Math.min(...pts.map((p) => p[0])) - 50,
+    Math.min(...pts.map((p) => p[1])) - 50,
+    Math.max(...pts.map((p) => p[0])) + 50,
+    Math.max(...pts.map((p) => p[1])) + 50,
+  ];
+  const vor = Delaunay.from(seeds).voronoi(bb);
+  const parts = [];
+  for (let k = 0; k < seeds.length; k++) {
+    const poly = vor.cellPolygon(k);
+    if (!poly) continue;
+    // Рёбра ячейки прямые на карте — при переводе в долготу и широту дробим их, чтобы не исказить.
+    let ring = [];
+    for (let j = 0; j < poly.length - 1; j++) {
+      const [x1, y1] = poly[j];
+      const [x2, y2] = poly[j + 1];
+      for (let t = 0; t < 16; t++) ring.push(projection.invert([x1 + ((x2 - x1) * t) / 16, y1 + ((y2 - y1) * t) / 16]));
+    }
+    ring.push(ring[0]);
+    if (cfg.wrapLon !== undefined) ring = ring.map(([x, y]) => [x < cfg.wrapLon ? x + 360 : x, y]);
+    if (Math.sign(ringArea(ring)) !== frameSign) ring.reverse();
+    const { part } = await ms(`-i region.json name=part -clip cell.json -o format=geojson precision=0.000001 part.json`, {
+      'region.json': { type: 'FeatureCollection', features: [{ type: 'Feature', properties: r.properties, geometry: r.geometry }] },
+      'cell.json': { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } }] },
+    });
+    const g = part.features.find((f) => f.geometry)?.geometry;
+    if (!g || areaKm2(g) < 1000) continue;
+    parts.push({
+      ...r,
+      properties: { ...r.properties, name: `${r.properties.name} #${k + 1}` },
+      geometry: g,
+      area: areaKm2(g),
+      lonlat: mainCentroid(g),
+      cellName: sp.names?.[k],
+    });
+  }
+  log(`   ${sp.region}: частей ${parts.length}`);
+  regions.splice(i, 1, ...parts);
+}
+
+// Группы мелких регионов в одну клетку со своим названием.
+for (const grp of cfg.regionGroups ?? []) {
+  for (const r of regions) if (grp.regions.includes(r.properties.name)) r.cellName = grp.name;
 }
 
 // Регионы, переданные другой стране (анклавы и отрезанные куски): точка внутри региона → код страны.
@@ -180,6 +275,10 @@ const { countries: admin0 } = await ms(
 const { places } = await ms(
   `-i ${shp('ne_10m_populated_places')} name=places -filter-fields NAME,NAME_RU,ADM0_A3,POP_MAX,FEATURECLA,ADM0CAP -o format=geojson places.json`,
 );
+// Точки городов — в ту же «развёрнутую» долготу, что и регионы.
+if (cfg.wrapLon !== undefined) {
+  for (const f of places.features) if (f.geometry.coordinates[0] < cfg.wrapLon) f.geometry.coordinates[0] += 360;
+}
 const allPlaces = places.features.map((f) => ({
   ...f.properties,
   ORIG_A3: f.properties.ADM0_A3,
@@ -325,7 +424,7 @@ if (cfg.onePerCountry) {
 if (cfg.onePerRegion) {
   const byKey = new Map();
   for (const r of regions) {
-    const key = cfg.regionMerge?.[r.properties.name] ?? r.properties.name;
+    const key = r.cellName ?? cfg.regionMerge?.[r.properties.name] ?? r.properties.name;
     if (!byKey.has(key)) byKey.set(key, provCount++);
     provOfRegion.set(r, byKey.get(key));
   }
@@ -405,6 +504,106 @@ log(`   фоновых регионов: ${planarBg.features.length}`);
 // ---------- 3. Морские зоны ----------
 
 log('3. Морские зоны…');
+// Ручные затравки (внутренние моря) остаются, сетка добавляется вокруг них.
+if (cfg.autoSeas) cfg.seas = [...cfg.seas, ...(await autoSeas(cfg.autoSeas))];
+
+/**
+ * Затравки морских зон по сетке: у берегов (ближе band км) — часто, в открытом океане — редко.
+ * Имя — по морю Natural Earth, в котором стоит точка (самому маленькому); одинаковые имена
+ * различаются ближайшим крупным городом.
+ */
+async function autoSeas({ near, far, band }) {
+  const boxes = regions.map((r) => ({ r, bb: bboxOf(r.geometry) }));
+  const onLand = (ll) => boxes.some(({ r, bb }) => ll[0] >= bb[0] && ll[0] <= bb[2] && ll[1] >= bb[1] && ll[1] <= bb[3] && pointInGeometry(ll, r.geometry));
+  // Береговые точки в корзинах 2°×2° — для быстрого расстояния до суши.
+  const buckets = new Map();
+  const key = (lon, lat) => `${Math.floor(lon / 2)}:${Math.floor(lat / 2)}`;
+  for (const r of regions) for (const ring of rings(r.geometry)) for (let i = 0; i < ring.length; i += 2) {
+    const k = key(ring[i][0], ring[i][1]);
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(ring[i]);
+  }
+  const distToLand = (ll) => {
+    let best = Infinity;
+    const reach = Math.ceil(band / 200) + 1;
+    const bx = Math.floor(ll[0] / 2);
+    const by = Math.floor(ll[1] / 2);
+    for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) {
+      for (const p of buckets.get(`${bx + dx}:${by + dy}`) ?? []) best = Math.min(best, kmBetween(ll, p));
+    }
+    return best;
+  };
+  const inside = (ll) => {
+    const [x, y] = projection(ll);
+    return x >= 0 && x <= W && y >= 0 && y <= H;
+  };
+  const grid = (step, keep) => {
+    const out = [];
+    const [lat0, lat1] = [projection.invert([W / 2, H])[1], projection.invert([W / 2, 0])[1]];
+    for (let lat = lat0 + step / 222; lat < lat1; lat += step / 111) {
+      const dlon = step / (111 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+      for (let lon = -180 + dlon / 2; lon < 180; lon += dlon) {
+        const ll = [lon, lat];
+        if (inside(ll) && !onLand(ll) && keep(distToLand(ll))) out.push(ll);
+      }
+    }
+    return out;
+  };
+  const manual = cfg.seas.map((s) => s.at);
+  const seeds = [...grid(near, (d) => d <= band), ...grid(far, (d) => d > band)].filter(
+    (ll) => manual.every((m) => kmBetween(ll, m) > near * 0.6),
+  );
+
+  const { marine } = await ms(
+    `-i ${shp('ne_10m_geography_marine_polys')} name=marine -filter-fields name_ru,name -o format=geojson marine.json`,
+  );
+  // Мелкие заливы не в счёт: затравка сетки стоит в открытом море, имя залива ему не подходит.
+  const seasPolys = marine.features
+    .filter((f) => f.geometry)
+    .map((f) => ({ f, bb: bboxOf(f.geometry), a: geometryArea(f.geometry) }))
+    .filter((m) => m.a >= 4);
+  const nameAt = (ll) => {
+    let best = null;
+    for (const m of seasPolys) {
+      if (ll[0] < m.bb[0] || ll[0] > m.bb[2] || ll[1] < m.bb[1] || ll[1] > m.bb[3]) continue;
+      if (!pointInGeometry(ll, m.f.geometry)) continue;
+      if (!best || m.a < best.a) best = m;
+    }
+    const [lon, lat] = ll;
+    const ocean =
+      lat > 62 ? 'Северный Ледовитый океан'
+      : lon > -100 && lon < 20 && (lat > 8 || lon > -70) ? 'Атлантический океан'
+      : lon >= 20 && lon < 135 && lat < 25 ? 'Индийский океан'
+      : 'Тихий океан';
+    const n = best?.f.properties.name_ru || best?.f.properties.name || ocean;
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  };
+  const cities = allPlaces.filter((p) => p.NAME_RU && p.POP_MAX >= 300000);
+  // В Арктике крупных городов нет — там годится и посёлок.
+  const towns = allPlaces.filter((p) => p.NAME_RU);
+  const named = seeds.map((at) => ({ at, name: nameAt(at) }));
+  const count = new Map();
+  for (const s of named) count.set(s.name, (count.get(s.name) ?? 0) + 1);
+  const used = new Set(cfg.seas.map((s) => s.name));
+  for (const s of named) {
+    // Одинаковые имена — по ближайшему городу, ещё не занятому для этого моря.
+    if (count.get(s.name) > 1) {
+      const free = (list, maxKm) =>
+        list
+          .map((p) => ({ p, d: kmBetween(s.at, p.at) }))
+          .filter(({ p, d }) => d <= maxKm && !used.has(`${s.name} (${p.NAME_RU})`))
+          .sort((a, b) => a.d - b.d)[0];
+      const hit = free(cities, 1500) ?? free(towns, 1500) ?? free(cities, Infinity);
+      if (hit) s.name = `${s.name} (${hit.p.NAME_RU})`;
+    }
+    let n = s.name;
+    for (let i = 2; used.has(n); i++) n = `${s.name} ${i}`;
+    s.name = n;
+    used.add(n);
+  }
+  log(`   затравок морских зон: ${named.length}`);
+  return named;
+}
 // Затравка может стоять чуть за краем карты — её зона всё равно заходит на карту. Далёкие не нужны.
 const nearFrame = (lonlat) => {
   const [x, y] = projection(lonlat);
@@ -517,6 +716,7 @@ for (const c of landCells) {
   const regs = regions.filter((r) => provOfRegion.get(r) === c.f.properties.prov);
   c.areaKm2 = regs.reduce((s, r) => s + r.area, 0);
   c.separateName = regs.find((r) => r.separateName)?.separateName;
+  c.cellName = regs.find((r) => r.cellName)?.cellName;
 }
 // Город — в провинцию, где он стоит; прибрежный город, выпавший из упрощённого контура, — в ближайшую своей страны.
 for (const p of placesPlanar) {
@@ -557,10 +757,17 @@ for (const c of landCells) {
   // Только города своей страны: точка на границе может попасть в соседний контур.
   const own = c.places.filter((p) => p.NAME_RU && p.ORIG_A3 === c.adm0);
   const cand = (own.length ? own : c.places.filter((p) => p.NAME_RU && p.ADM0_A3 === c.adm0))
-    .sort((a, b) => (b.ADM0CAP ?? 0) - (a.ADM0CAP ?? 0) || b.POP_MAX - a.POP_MAX);
+    .sort(
+      (a, b) =>
+        (b.ADM0CAP ?? 0) - (a.ADM0CAP ?? 0) ||
+        (cfg.preferAdmin1Capital ? Number(b.FEATURECLA === 'Admin-1 capital') - Number(a.FEATURECLA === 'Admin-1 capital') : 0) ||
+        b.POP_MAX - a.POP_MAX,
+    );
   const pick = cand.find((p) => !used.has(p.NAME_RU));
   if (c.separateName) {
     c.name = c.separateName;
+  } else if (c.cellName) {
+    c.name = c.cellName;
   } else if (cfg.nameBy === 'country') {
     c.name = countryName(c.adm0);
   } else if (cfg.nameBy === 'region') {
@@ -651,6 +858,8 @@ const result = {
       .map((p) => projection(p))
       .filter((p) => landCells.some((c) => pointInGeometry(p, c.f.geometry)))
       .map((p) => [Math.round(p[0]), Math.round(p[1])]),
+    // Широта у верхнего и нижнего края (по середине карты) — для деревьев по климату.
+    lat: [projection.invert([W / 2, 0])[1], projection.invert([W / 2, H])[1]].map((v) => Math.round(v * 10) / 10),
   },
   background: (final.bgland.features ?? final.bgland.geometries.map((g) => ({ geometry: g })))
     .filter((f) => f.geometry)

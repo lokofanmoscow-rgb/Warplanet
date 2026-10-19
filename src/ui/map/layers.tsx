@@ -63,7 +63,14 @@ export function SeaLayer({ geo }: { geo: MapGeometry }) {
   useEffect(() => {
     if (image) return;
     let alive = true;
-    renderImage(<SeaElements geo={geo} />, { width: geo.map.width, height: geo.map.height })
+    // Вода размытая — у больших карт её картинка в половину разрешения ничем не хуже.
+    const k = Math.min(1, 2200 / Math.max(geo.map.width, geo.map.height));
+    renderImage(
+      <Group transform={[{ scale: k }]}>
+        <SeaElements geo={geo} />
+      </Group>,
+      { width: Math.round(geo.map.width * k), height: Math.round(geo.map.height * k) },
+    )
       .then((img) => {
         if (!img || !alive) return;
         seaCache.set(geo.map.id, img);

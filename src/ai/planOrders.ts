@@ -412,20 +412,49 @@ function bfs(map: MapDef, sources: CellId[]): number[] {
   return dist;
 }
 
-/** Дейкстра от целей: стоимость входа в клетку задаёт cost (Infinity — непроходимо). */
+/** Дейкстра от целей: стоимость входа в клетку задаёт cost (Infinity — непроходимо). Очередь — двоичная куча. */
 function weightedDistance(map: MapDef, goals: CellId[], cost: (id: CellId) => number): number[] {
   const dist = new Array<number>(map.cells.length).fill(Infinity);
-  const done = new Array<boolean>(map.cells.length).fill(false);
-  for (const g of goals) dist[g] = 0;
-  for (;;) {
-    let cur = -1;
-    for (let i = 0; i < dist.length; i++) if (!done[i] && dist[i] < Infinity && (cur < 0 || dist[i] < dist[cur])) cur = i;
-    if (cur < 0) break;
-    done[cur] = true;
+  const heap: [number, CellId][] = [];
+  const push = (d: number, id: CellId) => {
+    heap.push([d, id]);
+    for (let i = heap.length - 1; i > 0; ) {
+      const up = (i - 1) >> 1;
+      if (heap[up][0] <= heap[i][0]) break;
+      [heap[up], heap[i]] = [heap[i], heap[up]];
+      i = up;
+    }
+  };
+  const pop = (): [number, CellId] => {
+    const top = heap[0];
+    const last = heap.pop()!;
+    if (heap.length) {
+      heap[0] = last;
+      for (let i = 0; ; ) {
+        const l = i * 2 + 1;
+        const r = l + 1;
+        let m = i;
+        if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+        if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+        if (m === i) break;
+        [heap[m], heap[i]] = [heap[i], heap[m]];
+        i = m;
+      }
+    }
+    return top;
+  };
+  for (const g of goals) {
+    dist[g] = 0;
+    push(0, g);
+  }
+  while (heap.length) {
+    const [d, cur] = pop();
+    if (d > dist[cur]) continue;
     for (const n of map.cells[cur].neighbors) {
       const c = cost(n);
-      if (c === Infinity) continue;
-      if (dist[cur] + c < dist[n]) dist[n] = dist[cur] + c;
+      if (c === Infinity || d + c >= dist[n]) continue;
+      dist[n] = d + c;
+      push(dist[n], n);
     }
   }
   return dist;

@@ -66,7 +66,7 @@ describe('ИИ-соперники', () => {
     expect(worst).toBeLessThan(300);
   });
 
-  test.each(['africa', 'usa'])('на карте %s (клетка = страна или штат) ИИ тоже играет: приказы верны, земля разбирается', (mapId) => {
+  test.each(['africa', 'usa', 'russia', 'world'])('на карте %s ИИ тоже играет: приказы верны, земля разбирается', (mapId) => {
     let s = aiGame(6, 77, 'hard', mapId);
     const map = getMap(mapId);
     for (let turn = 0; turn < 60 && !s.finished; turn++) {

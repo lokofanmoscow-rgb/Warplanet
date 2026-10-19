@@ -9,9 +9,24 @@ export interface DecorItem {
 
 const cache = new Map<string, DecorItem[]>();
 
+/** Широта точки карты; у старых карт без данных — условная, север сверху (55° → 35°). */
+function latitudeAt(map: MapDef, y: number): number {
+  const [top, bottom] = map.decor?.lat ?? [65, 35];
+  return top + ((bottom - top) * y) / map.height;
+}
+
+/** Дерево по климату: ели на севере, лиственные в умеренном поясе, пальмы в тропиках. */
+function treeFor(lat: number, r: number): number {
+  const a = Math.abs(lat);
+  if (a >= 55) return r < 0.7 ? 2 : r < 0.85 ? 0 : 5;
+  if (a >= 38) return r < 0.45 ? 0 : r < 0.7 ? 1 : r < 0.85 ? 2 : 5;
+  if (a >= 25) return r < 0.35 ? 3 : r < 0.6 ? 1 : 5;
+  return r < 0.55 ? 3 : r < 0.85 ? 0 : 5;
+}
+
 /**
  * Декор суши, расставленный по сиду карты: горы — на хребтах из данных карты,
- * деревья — по широте (ели на севере, пальмы на юге), холмы между ними.
+ * деревья — по широте (ели на севере, пальмы в тропиках), холмы между ними.
  */
 export function decorFor(geo: MapGeometry): DecorItem[] {
   const map: MapDef = geo.map;
@@ -40,12 +55,7 @@ export function decorFor(geo: MapGeometry): DecorItem[] {
       const x = rng.range(x0, x1);
       const y = rng.range(y0, y1);
       if (cellAt(geo, x, y) !== c.id || !far(x, y, 16) || !awayFromCity(x, y)) continue;
-      const lat = y / map.height;
-      let kind: number;
-      const r = rng.next();
-      if (lat < 0.4) kind = r < 0.7 ? 2 : r < 0.85 ? 0 : 5;
-      else if (lat > 0.72) kind = r < 0.4 ? 3 : r < 0.75 ? 1 : 5;
-      else kind = r < 0.45 ? 0 : r < 0.7 ? 1 : r < 0.85 ? 2 : 5;
+      const kind = treeFor(latitudeAt(map, y), rng.next());
       items.push({ kind, x, y });
       placed++;
     }

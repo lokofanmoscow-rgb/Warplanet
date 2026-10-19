@@ -39,7 +39,8 @@ export interface MapDef {
   /** Русские названия стран по коду. */
   countries?: Record<string, string>;
   /** Декор: точки гор. */
-  decor?: { mountains: [number, number][] };
+  /** Горы (точки карты) и широта у верхнего и нижнего края — для декора. */
+  decor?: { mountains: [number, number][]; lat?: [number, number] };
 }
 
 // ---------- Состояние партии ----------
