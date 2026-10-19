@@ -178,7 +178,7 @@ export const CONFIG = {
   net: {
     port: 47630,
     serviceType: 'conquest',
-    protocolVersion: 6,
+    protocolVersion: 7,
     pingIntervalMs: 5000,
     // Нет данных дольше этого — соединение считается потерянным.
     timeoutMs: 15000,

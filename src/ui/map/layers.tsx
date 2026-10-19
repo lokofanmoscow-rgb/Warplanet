@@ -10,10 +10,12 @@ import {
   Rect,
   Shader,
   Skia,
+  StrokeJoin,
   Text,
   useClock,
   type SkFont,
   type SkImage,
+  type SkPath,
 } from '@shopify/react-native-skia';
 import { useDerivedValue, type SharedValue } from 'react-native-reanimated';
 import type { CellId, CellState, GameState, PlayerId } from '../../engine';
@@ -33,6 +35,11 @@ function SeaElements({ geo }: { geo: MapGeometry }) {
     b.addPath(geo.backgroundPath);
     return b.build();
   }, [geo]);
+  // Линии вдоль берега, как на старых картах: контур полосы вокруг суши (внутренняя половина уходит под сушу).
+  const coastRings = useMemo(
+    () => [14, 30].map((w) => Skia.Path.Stroke(landAll, { width: w, join: StrokeJoin.Round })).filter((p): p is SkPath => p !== null),
+    [landAll],
+  );
   return (
     <Group>
       <Rect x={0} y={0} width={map.width} height={map.height} color={COLORS.seaDeep} />
@@ -43,6 +50,15 @@ function SeaElements({ geo }: { geo: MapGeometry }) {
       <Path path={landAll} color={withAlpha(COLORS.seaCoast, 0.9)}>
         <BlurMask blur={12} style="normal" />
       </Path>
+      {coastRings.map((ring, i) => (
+        <Path key={i} path={ring} color={`rgba(225,242,255,${i === 0 ? 0.3 : 0.15})`} style="stroke" strokeWidth={1.1} />
+      ))}
+      {/* Тень суши на воде: материк будто лежит поверх моря. */}
+      <Group transform={[{ translateX: 2.5 }, { translateY: 4 }]}>
+        <Path path={landAll} color="rgba(6,24,44,0.45)">
+          <BlurMask blur={5} style="normal" />
+        </Path>
+      </Group>
       {/* Границы морских зон. */}
       <Path path={geo.seaBorders} color="rgba(220,240,255,0.22)" style="stroke" strokeWidth={1.4}>
         <DashPathEffect intervals={[7, 6]} />
@@ -182,6 +198,10 @@ export const LandLayer = React.memo(function LandLayer({
           <ImageShader image={noise} tx="repeat" ty="repeat" />
         </Path>
       )}
+      {/* Песчаная полоса вдоль берега изнутри суши. */}
+      <Group clip={geo.landPath}>
+        <Path path={geo.coastPath} color="rgba(240,222,170,0.32)" style="stroke" strokeWidth={7} strokeJoin="round" />
+      </Group>
       {/* Нейтральные провинции: лёгкая диагональная штриховка. */}
       <Group clip={neutral}>
         <Path path={geo.hatch} color="rgba(59,47,47,0.16)" style="stroke" strokeWidth={1.2} />
@@ -201,8 +221,9 @@ export const LandLayer = React.memo(function LandLayer({
       <Path path={geo.provinceBorders} color={withAlpha(COLORS.border, 0.4)} style="stroke" strokeWidth={1.5} strokeJoin="round" />
       {/* Берег. */}
       <Path path={geo.coastPath} color={withAlpha(COLORS.border, 0.55)} style="stroke" strokeWidth={1.2} strokeJoin="round" />
-      {/* Границы государств: 3 px. */}
+      {/* Границы государств: 3 px тёмная линия и тонкий светлый блик — как гравировка. */}
       <Path path={borders} color={withAlpha(COLORS.border, 0.9)} style="stroke" strokeWidth={3} strokeJoin="round" strokeCap="round" />
+      <Path path={borders} color="rgba(255,240,210,0.35)" style="stroke" strokeWidth={0.8} strokeJoin="round" strokeCap="round" />
     </Group>
   );
 });
@@ -275,7 +296,8 @@ export const LabelLayer = React.memo(function LabelLayer({ geo, font, k }: { geo
         const y = c.center[1] + 18 + size * k;
         return (
           <Group key={c.id} transform={[{ translateX: x }, { translateY: y }, { scale: k }]}>
-            <Text x={0.8} y={0.8} text={c.name} font={font} color="rgba(0,0,0,0.45)" />
+            {/* Светлый ореол — подпись читается поверх границ, декора и тёмных стран. */}
+            <Text x={0} y={0} text={c.name} font={font} color="rgba(250,240,218,0.8)" style="stroke" strokeWidth={2.6} strokeJoin="round" />
             <Text x={0} y={0} text={c.name} font={font} color="#2B2118" />
           </Group>
         );
