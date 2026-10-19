@@ -18,7 +18,7 @@ import {
   type PlayerId,
   type Squad,
 } from '../../engine';
-import { Button, Panel, Row, Stepper, Swatch, T, Title } from '../components';
+import { Button, Panel, Row, SoundToggles, Stepper, Swatch, T, Title } from '../components';
 import { describeLog, fmtAp, plural, type NewsItem } from '../describe';
 import { Icon } from '../icons';
 import { COLORS, useLayout } from '../theme';
@@ -357,6 +357,7 @@ export function GameMenu({
       <View style={{ gap: 10 * s }}>
         <Button label="Продолжить" variant="primary" onPress={onResume} />
         <Button label="Журнал прошлого хода" icon="log" onPress={onLog} />
+        <SoundToggles />
         <Button label={canSave ? 'Сохранить и выйти' : 'Выйти в меню'} variant="danger" onPress={onExit} />
         {canSave && (
           <T dim size={12} style={{ textAlign: 'center' }}>

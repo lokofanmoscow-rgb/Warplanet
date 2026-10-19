@@ -7,7 +7,7 @@ import { continueSaved } from '../../game/sessions';
 import { clearSave, getPlayerName, listSaves, loadSave, setPlayerName, type SaveMeta } from '../../game/storage';
 import { DEFAULT_MAP_ID } from '../../maps';
 import { networkAvailable } from '../../net/platform';
-import { Button, Panel, Swatch, T, Title } from '../components';
+import { Button, Panel, SoundToggles, Swatch, T, Title } from '../components';
 import { Overlay } from '../game/Dialogs';
 import { Icon } from '../icons';
 import { MapView } from '../map/MapView';
@@ -143,6 +143,7 @@ export function MainMenu() {
                 style={[styles.input, { fontSize: 15 * s, paddingVertical: 6 * s }]}
               />
             </View>
+            <SoundToggles />
           </View>
         </Panel>
       </ScrollView>

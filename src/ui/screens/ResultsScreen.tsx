@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getMap, ownedLandCount, type GameState } from '../../engine';
@@ -7,6 +7,7 @@ import { Button, Panel, Swatch, T, Title } from '../components';
 import { END_REASON } from '../describe';
 import { useNav } from '../nav';
 import { COLORS, useLayout } from '../theme';
+import { feedback } from '../sound';
 import { StatsChart } from './StatsChart';
 
 export function ResultsScreen({ game, viewer }: { game: GameState; mode: Mode; viewer: number | null }) {
@@ -20,6 +21,10 @@ export function ResultsScreen({ game, viewer }: { game: GameState; mode: Mode; v
     (a, b) => ownedLandCount(game, map, b.id) - ownedLandCount(game, map, a.id) || Number(b.alive) - Number(a.alive),
   );
   const chartW = Math.min(560 * s, width - 60);
+  // Победа — фанфара; поражение или чужая победа — минор.
+  useEffect(() => {
+    feedback(won || (winner === null && viewer !== null && game.players[viewer]?.alive) ? 'victory' : 'defeat', won ? 'success' : 'warning');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={[styles.center, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>

@@ -10,9 +10,25 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Icon, type IconName } from './icons';
+import { play, setPrefs, usePrefs, type SoundPrefs } from './sound';
 import { COLORS, FONTS, useLayout } from './theme';
 
 // Тёмные панели с золотой рамкой, кнопки, переключатели.
+
+/** Нажатие с щелчком. */
+function withClick(onPress?: () => void) {
+  return onPress
+    ? () => {
+        play('click');
+        onPress();
+      }
+    : undefined;
+}
+
+function tap<V>(onChange: (v: V) => void, v: V) {
+  play('click');
+  onChange(v);
+}
 
 export function T({ style, bold, dim, size, ...rest }: TextProps & { bold?: boolean; dim?: boolean; size?: number }) {
   const { s } = useLayout();
@@ -68,7 +84,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
-      onPress={onPress}
+      onPress={withClick(onPress)}
       style={({ pressed }) => [
         styles.button,
         {
@@ -116,7 +132,7 @@ export function RoundButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
-      onPress={onPress}
+      onPress={withClick(onPress)}
       style={({ pressed }) => [
         styles.round,
         {
@@ -160,7 +176,7 @@ export function Stepper({
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={delta < 0 ? value <= min : value >= max}
-      onPress={() => onChange(Math.max(min, Math.min(max, value + delta)))}
+      onPress={() => tap(onChange, Math.max(min, Math.min(max, value + delta)))}
       style={({ pressed }) => [
         styles.stepBtn,
         { width: 40 * s, height: 40 * s, borderRadius: 8 * s, opacity: (delta < 0 ? value <= min : value >= max) ? 0.35 : pressed ? 0.7 : 1 },
@@ -201,7 +217,7 @@ export function Segmented<V extends string | number>({
             key={String(o.value)}
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
-            onPress={() => onChange(o.value)}
+            onPress={() => tap(onChange, o.value)}
             style={[
               styles.seg,
               {
@@ -267,6 +283,58 @@ export const textStyles = StyleSheet.create({
   center: { textAlign: 'center' } as TextStyle,
 });
 
+/** Переключатели звука, музыки и вибрации: выключенный — тусклый и зачёркнутый. */
+export function SoundToggles() {
+  const { s } = useLayout();
+  const prefs = usePrefs();
+  const item = (key: keyof SoundPrefs, icon: IconName, label: string) => {
+    const on = prefs[key];
+    return (
+      <Pressable
+        key={key}
+        accessibilityRole="switch"
+        accessibilityLabel={label}
+        accessibilityState={{ checked: on }}
+        onPress={() => {
+          setPrefs({ [key]: !on });
+          if (key === 'sound' && !on) play('click');
+        }}
+        style={({ pressed }) => [
+          styles.toggle,
+          {
+            gap: 6 * s,
+            paddingVertical: 8 * s,
+            paddingHorizontal: 10 * s,
+            borderRadius: 10 * s,
+            borderColor: on ? COLORS.gold : COLORS.goldDark,
+            backgroundColor: on ? COLORS.panelLight : 'transparent',
+            opacity: pressed ? 0.7 : 1,
+          },
+        ]}
+      >
+        <Icon name={icon} size={18 * s} color={on ? COLORS.goldLight : COLORS.textDim} />
+        <Text
+          style={{
+            fontFamily: FONTS.bold,
+            fontSize: 13 * s,
+            color: on ? COLORS.text : COLORS.textDim,
+            textDecorationLine: on ? 'none' : 'line-through',
+          }}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    );
+  };
+  return (
+    <View style={[styles.row, { gap: 6 * s, justifyContent: 'center', flexWrap: 'wrap' }]}>
+      {item('sound', 'sound', 'Звук')}
+      {item('music', 'music', 'Музыка')}
+      {item('vibration', 'vibration', 'Вибрация')}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   panelOuter: {
     flexShrink: 1,
@@ -314,5 +382,6 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'center' },
   seg: { borderWidth: 1.5 },
+  toggle: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5 },
   divider: { height: 1, backgroundColor: COLORS.goldDark, opacity: 0.6, marginVertical: 10 },
 });

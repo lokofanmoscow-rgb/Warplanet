@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { feedback, play, type Sfx } from '../sound';
 import {
   actionGold,
   atWar,
@@ -69,6 +70,16 @@ const ACTION_LABEL: Record<Action['type'], string> = {
   develop: 'Хозяйство',
 };
 
+/** Звук приказа: найм — монеты и барабан, стройка — молоток, покупка и грабёж — монеты, праздник — колокольчики. */
+const ACTION_SOUND: Record<Action['type'], Sfx> = {
+  recruit: 'recruit',
+  fortify: 'build',
+  develop: 'build',
+  buy: 'coins',
+  loot: 'coins',
+  festival: 'peace',
+};
+
 /** Панель провинции: данные и действия. Тап по своей провинции открывает действия. */
 export function ProvincePanel({
   controller,
@@ -94,11 +105,17 @@ export function ProvincePanel({
 }) {
   const onWar = (target: PlayerId) => {
     const err = controller.declareWar(target);
-    if (err) onError(err);
+    if (err) fail(err);
+    else feedback('war', 'medium');
   };
   const onPeace = (target: PlayerId) => {
     const err = controller.offerPeace(target);
-    if (err) onError(err);
+    if (err) fail(err);
+    else play('peace');
+  };
+  const fail = (msg: string) => {
+    feedback('error', 'error');
+    onError(msg);
   };
   const { s } = useLayout();
   const def = map.cells[cell];
@@ -119,7 +136,8 @@ export function ProvincePanel({
 
   const act = (a: Action) => {
     const err = controller.addAction(a);
-    if (err) onError(err);
+    if (err) fail(err);
+    else feedback(ACTION_SOUND[a.type], 'light');
   };
 
   const planned = orders.actions.map((a, i) => ({ a, i })).filter((x) => x.a.cell === cell);

@@ -13,12 +13,17 @@ import { HostLobby } from './screens/HostLobby';
 import { FindGame } from './screens/FindGame';
 import { GameScreen } from './screens/GameScreen';
 import { ResultsScreen } from './screens/ResultsScreen';
+import { initSound } from './sound';
 
 export default function App() {
   const [fontsLoaded] = useFonts(FONT_FILES);
   const [screen, setScreen] = useState<Screen>({ name: 'menu' });
 
   const go = useCallback((next: Screen) => setScreen(next), []);
+
+  useEffect(() => {
+    void initSound();
+  }, []);
 
   // Кнопка «назад» Android: из вспомогательных экранов — в меню; в партии её обрабатывает экран игры.
   useEffect(() => {

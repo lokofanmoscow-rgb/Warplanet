@@ -14,6 +14,7 @@ import { BATTLE_MS, battleResult, battlesFor, BattleScene, PendingFills, RESULT_
 import { buildUnits, MapView, WALK_STEP_MS, type WalkInfo } from '../map/MapView';
 import type { UnitInfo } from '../map/units';
 import { useNav } from '../nav';
+import { feedback, play } from '../sound';
 import { COLORS, useLayout } from '../theme';
 
 const NO_TARGETS: CellId[] = [];
@@ -76,6 +77,9 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     const viewers = c.localPlayers();
     const list = battlesFor(c.log, game, map, viewers);
     const n = newsFor(game, map, viewers);
+    // Новый ход звучит колоколом; объявление войны — барабанами; бои озвучиваются при показе.
+    if (n.war) feedback('war', 'warning');
+    else if (list.length === 0 || n.items.length > 0) play('turn');
     if (n.items.length > 0) setNews({ ...n, battles: list });
     else showBattles(list);
   }, [game.turn, game.finished]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -94,8 +98,16 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   // Бой за боем: камера на клетку, через RESULT_AT — итог, через BATTLE_MS — следующий.
   useEffect(() => {
     if (!replay || replay.result) return;
-    setFocus(replay.list[replay.index].cell);
-    const showResult = setTimeout(() => setReplay((r) => (r ? { ...r, result: true } : r)), RESULT_AT);
+    const shown = replay.list[replay.index];
+    setFocus(shown.cell);
+    feedback('battle', 'heavy');
+    const showResult = setTimeout(() => {
+      setReplay((r) => (r ? { ...r, result: true } : r));
+      const viewers = c.localPlayers();
+      const good = battleResult(shown, map, viewers, () => '').good;
+      if (good) feedback('capture', 'success');
+      else feedback('lost', 'warning');
+    }, RESULT_AT);
     const next = setTimeout(() => {
       setReplay((r) => (r && r.index + 1 < r.list.length ? { ...r, index: r.index + 1, result: false } : null));
       if (replay.index + 1 >= replay.list.length) setLogOpen(true);
@@ -193,6 +205,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     if (!editable || (plan.available[from] ?? 0) <= 0) return false;
     const r = reachable(plan.projected, map, player, from).get(to);
     if (!r) {
+      feedback('error', 'error');
       setToast(moveBlockReason(plan.projected, map, player, from, to));
       return false;
     }
@@ -218,6 +231,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   const onTapCell = (cell: CellId | null, at: { x: number; y: number }) => {
     if (replay) return;
     setChooser(null);
+    if (cell !== null) play('select');
     if (cell === null) {
       setSelected(null);
       setMoveFrom(null);
@@ -256,9 +270,11 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
     const count = squadSize(squad);
     const err = c.addMove({ from, to, count, ...(squad.cav ? { cav: squad.cav } : {}), ...(squad.art ? { art: squad.art } : {}) });
     if (err) {
+      feedback('error', 'error');
       setToast(err);
       return;
     }
+    feedback('march', 'light');
     const next = c.plan();
     const i = c.orders().moves.findIndex((m) => m.from === from && m.to === to);
     const r = next.moveReach[i];
@@ -320,6 +336,10 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
           ([from, to]) => to === player && !answered.has(`${game.turn}:${player}:${from}`) && !(orders.peace ?? []).includes(from),
         )?.[0]
       : undefined;
+  // Предложение мира показывается — колокольчики.
+  useEffect(() => {
+    if (offerFrom !== undefined) play('peace');
+  }, [offerFrom]);
   const answerOffer = (from: PlayerId, accept: boolean) => {
     if (accept) {
       const err = c.offerPeace(from);
@@ -507,6 +527,7 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
           editable={editable}
           onCancel={() => setTaxOpen(false)}
           onConfirm={(tax) => {
+            if (tax !== orders.tax) play('coins');
             c.setTax(tax);
             setTaxOpen(false);
           }}

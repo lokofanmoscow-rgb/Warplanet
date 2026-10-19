@@ -31,7 +31,10 @@ export type IconName =
   | 'close'
   | 'swords'
   | 'city'
-  | 'army';
+  | 'army'
+  | 'sound'
+  | 'music'
+  | 'vibration';
 
 const OUT = COLORS.border;
 const NO_IMAGES = {};
@@ -319,6 +322,35 @@ function Glyph({ name, color }: { name: IconName; color: string }) {
       return (
         <Group transform={[{ translateX: -2.4 }, { translateY: -5.2 }, { scale: 0.31 }]}>
           <SoldierGroup color={color} fight={false} />
+        </Group>
+      );
+    case 'sound':
+      // Динамик с волнами.
+      return (
+        <Group>
+          <Path path={p((q) => { q.moveTo(3, 9); q.lineTo(7, 9); q.lineTo(12, 4.5); q.lineTo(12, 19.5); q.lineTo(7, 15); q.lineTo(3, 15); q.close(); })} color={color} />
+          <Path path={p((q) => q.addArc({ x: 9, y: 7.5, width: 8, height: 9 }, -55, 110))} color={color} style="stroke" strokeWidth={1.8} strokeCap="round" />
+          <Path path={p((q) => q.addArc({ x: 8, y: 3.5, width: 13, height: 17 }, -55, 110))} color={color} style="stroke" strokeWidth={1.8} strokeCap="round" />
+        </Group>
+      );
+    case 'music':
+      // Две ноты под ребром.
+      return (
+        <Group>
+          <Path path={p((q) => { q.moveTo(9, 17); q.lineTo(9, 5.5); q.lineTo(20, 3); q.lineTo(20, 15); })} color={color} style="stroke" strokeWidth={2} strokeJoin="round" />
+          <Path path={p((q) => { q.moveTo(9, 5.5); q.lineTo(20, 3); q.lineTo(20, 6.5); q.lineTo(9, 9); q.close(); })} color={color} />
+          <Circle cx={6.5} cy={17.5} r={3} color={color} />
+          <Circle cx={17.5} cy={15.5} r={3} color={color} />
+        </Group>
+      );
+    case 'vibration':
+      // Телефон с дрожью по бокам.
+      return (
+        <Group>
+          <RoundedRect x={8} y={3} width={8} height={18} r={1.8} color={color} style="stroke" strokeWidth={1.8} />
+          <Rect x={10.5} y={17.5} width={3} height={1.2} color={color} />
+          <Path path={p((q) => { q.moveTo(4.5, 8); q.lineTo(3, 10); q.lineTo(4.5, 12); q.lineTo(3, 14); q.lineTo(4.5, 16); })} color={color} style="stroke" strokeWidth={1.5} strokeCap="round" strokeJoin="round" />
+          <Path path={p((q) => { q.moveTo(19.5, 8); q.lineTo(21, 10); q.lineTo(19.5, 12); q.lineTo(21, 14); q.lineTo(19.5, 16); })} color={color} style="stroke" strokeWidth={1.5} strokeCap="round" strokeJoin="round" />
         </Group>
       );
     case 'swords':

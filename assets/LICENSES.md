@@ -6,7 +6,8 @@
 |---|---|---|
 | `fonts/PTSans-Regular.ttf`, `fonts/PTSans-Bold.ttf` | PT Sans, ParaType, через Google Fonts (`@expo-google-fonts/pt-sans`) | SIL Open Font License 1.1 (`fonts/OFL.txt`) |
 | `fonts/PTSerif-Regular.ttf`, `fonts/PTSerif-Bold.ttf` | PT Serif, ParaType, через Google Fonts (`@expo-google-fonts/pt-serif`) | SIL Open Font License 1.1 |
-| `maps/europe.json` | Собран скриптом `tools/maps/build.mjs` из Natural Earth 1:10m (admin 1, admin 0, populated places) | Natural Earth — общественное достояние |
+| `maps/*.json` (Европа, Африка, США, Россия, мир) | Собраны скриптом `tools/maps/build.mjs` из Natural Earth 1:10m (admin 1, admin 0, populated places, lakes, marine polys) | Natural Earth — общественное достояние |
+| `sounds/*.wav`, `sounds/music.mp3` | Синтезированы скриптом `tools/gen-sounds.mjs` (`npm run sounds`), без чужих записей | Свои, можно использовать свободно |
 | `icon.png`, `android-icon-*.png`, `splash-icon.png`, `favicon.png` | Нарисованы для проекта (SVG → PNG) | Свои, можно использовать свободно |
 | Спрайты городов, армий и флотов, декора, иконки интерфейса | Рисуются кодом (`src/ui/map/sprites.tsx`, `src/ui/map/units.tsx`, `src/ui/icons.tsx`) | Свои |
 
