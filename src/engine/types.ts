@@ -88,6 +88,9 @@ export interface CellState {
 
 export type VictoryType = 'superiority' | 'domination' | 'annihilation' | 'flag';
 
+/** Начало партии: classic — столица и пара провинций, остальное ничейное; divided — вся суша сразу поделена. */
+export type StartMode = 'classic' | 'divided';
+
 export interface GameSettings {
   mapId: string;
   victory: VictoryType;
@@ -99,6 +102,8 @@ export interface GameSettings {
   flagCell: CellId | null;
   /** Лимит ходов, 0 — без лимита. */
   turnLimit: number;
+  /** Как поделена карта в начале. В старых сохранениях поля нет — classic. */
+  startMode?: StartMode;
 }
 
 export interface GameState {

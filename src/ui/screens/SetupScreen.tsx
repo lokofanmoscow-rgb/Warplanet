@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 import { CONFIG, getMap, type CellId } from '../../engine';
-import { defaultSetup } from '../../game/match';
+import { defaultSetup, newMatch, newSeed } from '../../game/match';
 import { startLocal } from '../../game/sessions';
 import { getPlayerName } from '../../game/storage';
 import { DEFAULT_MAP_ID } from '../../maps';
@@ -36,6 +36,8 @@ export function SetupScreen({ mode }: { mode: 'ai' | 'hotseat' }) {
         ],
   );
   const [picker, setPicker] = useState(0);
+  // Сид партии выбирается заранее: поделённая карта на превью та же, что будет в игре.
+  const [seed, setSeed] = useState(newSeed);
 
   useEffect(() => {
     if (mode === 'ai') void getPlayerName().then((name) => setHumans((h) => [{ ...h[0], name }]));
@@ -75,15 +77,20 @@ export function SetupScreen({ mode }: { mode: 'ai' | 'hotseat' }) {
     setSettings((st) => ({ ...st, ...patch }));
   };
 
+  const named = humans.map((h, i) => ({ name: h.name.trim() || `Игрок ${i + 1}`, start: h.start }));
+  const divided = settings.startMode === 'divided';
+  const canStart = mode === 'ai' ? settings.aiCount >= 1 : humans.length + settings.aiCount >= 2;
+  // Имена на раздел не влияют — пересчёт только по столицам и настройкам.
+  const startsKey = humans.map((h) => h.start).join(',');
+  const preview = useMemo(
+    () => (divided && canStart ? newMatch({ ...settings, humans: named, seed }) : null),
+    [divided, canStart, settings, seed, startsKey], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const start = () => {
-    const controller = startLocal(mode, {
-      ...settings,
-      humans: humans.map((h, i) => ({ name: h.name.trim() || `Игрок ${i + 1}`, start: h.start })),
-    });
+    const controller = startLocal(mode, { ...settings, humans: named, seed });
     go({ name: 'game', controller });
   };
-
-  const canStart = mode === 'ai' ? settings.aiCount >= 1 : humans.length + settings.aiCount >= 2;
 
   return (
     <LobbyLayout
@@ -94,6 +101,7 @@ export function SetupScreen({ mode }: { mode: 'ai' | 'hotseat' }) {
         return { cell, color: idx >= 0 ? CONFIG.players.colors[idx] : null, label: idx >= 0 ? humans[idx].name : undefined };
       })}
       onPickStart={pick}
+      preview={preview}
       onBack={() => go({ name: 'menu' })}
       footer={<Button label="Начать" variant="primary" icon="swords" disabled={!canStart} onPress={start} />}
     >
@@ -137,6 +145,11 @@ export function SetupScreen({ mode }: { mode: 'ai' | 'hotseat' }) {
         ))}
       </Field>
       <SettingsForm value={settings} onChange={changeSettings} minAI={mode === 'ai' ? 1 : 0} maxAI={maxAI} />
+      {divided && (
+        <Field label="Раздел карты" hint="На карте слева — как будут поделены земли. Столицу можно выбрать кольцом.">
+          <Button label="Поделить по-другому" small icon="flag" onPress={() => setSeed(newSeed())} />
+        </Field>
+      )}
     </LobbyLayout>
   );
 }

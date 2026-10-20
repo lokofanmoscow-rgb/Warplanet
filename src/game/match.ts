@@ -1,7 +1,15 @@
-import { CONFIG, createGame, getMap, type Difficulty, type GameState, type VictoryType } from '../engine';
+import {
+  CONFIG,
+  createGame,
+  getMap,
+  resolveTurn,
+  type Difficulty,
+  type GameState,
+  type OrdersByPlayer,
+  type StartMode,
+  type VictoryType,
+} from '../engine';
 import { planAllAI } from '../ai/planOrders';
-import { resolveTurn } from '../engine';
-import type { OrdersByPlayer } from '../engine';
 import '../maps';
 
 export interface MatchSetup {
@@ -12,6 +20,7 @@ export interface MatchSetup {
   turnLimit: number;
   aiCount: number;
   aiDifficulty: Difficulty;
+  startMode: StartMode;
   humans: { name: string; start: number | null }[];
   seed?: number;
 }
@@ -25,6 +34,7 @@ export function defaultSetup(mapId: string): Omit<MatchSetup, 'humans'> {
     turnLimit: 0,
     aiCount: 4,
     aiDifficulty: 'medium',
+    startMode: 'classic',
   };
 }
 
@@ -46,6 +56,7 @@ export function newMatch(setup: MatchSetup): GameState {
     superiority: setup.superiority,
     flagTurns: setup.flagTurns,
     turnLimit: setup.turnLimit,
+    startMode: setup.startMode,
     players: [
       ...setup.humans.map((h) => ({ name: h.name, kind: 'human' as const, start: h.start })),
       ...Array.from({ length: total - setup.humans.length }, (_, i) => ({

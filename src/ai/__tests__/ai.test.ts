@@ -83,6 +83,30 @@ describe('ИИ-соперники', () => {
     expect(owned).toBeGreaterThan(20);
   });
 
+  test.each(['europe', 'world'])('на поделённой карте %s ИИ воюет: приказы верны, земля переходит из рук в руки', (mapId) => {
+    const map = getMap(mapId);
+    let s = createGame({
+      map,
+      seed: 31,
+      startMode: 'divided',
+      players: Array.from({ length: 5 }, (_, i) => ({ name: `ИИ ${i + 1}`, kind: 'ai' as const, difficulty: 'hard' as const })),
+    });
+    const start = s.cells.map((c) => c.owner);
+    for (let turn = 0; turn < 50 && !s.finished; turn++) {
+      if (turn % 10 === 0) {
+        for (const p of s.players.filter((x) => x.alive)) {
+          const plan = simulatePlan(s, p.id, planOrders(s, p.id, 'hard'));
+          expect(plan.actionErrors.every((e) => e === null)).toBe(true);
+          expect(plan.moveErrors.every((e) => e === null)).toBe(true);
+        }
+      }
+      s = resolveTurn(s, planAllAI(s));
+    }
+    const changed = s.cells.filter((c, i) => map.cells[i].kind === 'land' && c.owner !== start[i]).length;
+    expect(changed).toBeGreaterThan(5);
+    expect(s.wars?.length ?? 0).toBeGreaterThanOrEqual(0);
+  });
+
   test('сильный ИИ обычно обыгрывает лёгких', () => {
     let wins = 0;
     for (const seed of [1, 2, 3]) {

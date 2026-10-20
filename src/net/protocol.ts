@@ -1,4 +1,4 @@
-import { CONFIG, type Difficulty, type GameState, type PlayerId, type PlayerOrders, type VictoryType } from '../engine';
+import { CONFIG, type Difficulty, type GameState, type PlayerId, type PlayerOrders, type StartMode, type VictoryType } from '../engine';
 
 // Транспорт: TCP-сокет, сообщения в JSON, одно на строку.
 // Типы сообщений: hello, orders, state, ping, game_over; probe — короткий опрос «кто тут» при поиске игры.
@@ -13,6 +13,7 @@ export interface LobbySettings {
   turnLimit: number;
   aiCount: number;
   aiDifficulty: Difficulty;
+  startMode: StartMode;
 }
 
 export interface LobbyState {

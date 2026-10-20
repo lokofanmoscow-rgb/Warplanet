@@ -313,13 +313,17 @@ export function planOrders(state: GameState, playerId: PlayerId, difficulty: Dif
 
   // Новую войну ИИ начинает осторожно: не больше одной за ход, не больше fronts войн сразу,
   // не во время перемирия и только против страны, чья армия слабее в warRatio раз.
+  // Когда ничейной суши нет (поделённая карта или вся разобрана), расти можно только войной:
+  // с каждым ходом ИИ решается на неё при всё меньшем перевесе (на 2% за ход, до −20%).
+  const neutralLeft = cells.some((c, i) => isLand(i) && c.owner === null);
+  const warRatio = P.warRatio * (neutralLeft ? 1 : Math.max(0.8, 1 - 0.02 * Math.max(0, state.turn - 5)));
   const fronts = proj.players.filter((p) => p.alive && atWar(proj, playerId, p.id) && !peace.has(p.id)).length;
   const mayFight = (owner: PlayerId | null) =>
     owner === null ||
     (!peace.has(owner) &&
       (atWar(proj, playerId, owner) ||
         wars.has(owner) ||
-        (wars.size === 0 && fronts < P.fronts && warError(proj, playerId, owner) === null && armyOf(playerId) >= armyOf(owner) * P.warRatio)));
+        (wars.size === 0 && fronts < P.fronts && warError(proj, playerId, owner) === null && armyOf(playerId) >= armyOf(owner) * warRatio)));
 
   // Атака с перевесом (по силе, а не по числу солдат). Несколько армий идут в одну провинцию вместе.
   for (const t of targetsOf()) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { CONFIG, DIFFICULTIES, getMap, type Difficulty, type VictoryType } from '../../engine';
+import { CONFIG, DIFFICULTIES, getMap, type Difficulty, type StartMode, type VictoryType } from '../../engine';
 import { MAPS } from '../../maps';
 import type { LobbySettings } from '../../net/protocol';
 import { Field, Segmented, Stepper, T } from '../components';
@@ -19,6 +19,16 @@ export const VICTORY_HINT: Record<VictoryType, string> = {
 };
 
 const LIMITS = [0, 30, 50, 100];
+
+export const START_LABEL: Record<StartMode, string> = {
+  classic: 'Обычное',
+  divided: 'Карта поделена',
+};
+
+const START_HINT: Record<StartMode, string> = {
+  classic: 'У каждого столица и две провинции, остальная суша ничейная',
+  divided: 'Вся суша сразу поровну поделена между игроками, ничейных клеток нет; в каждой провинции небольшой гарнизон',
+};
 
 const MAP_HINT: Record<string, string> = {
   europe: 'Страны поделены на провинции, рядом моря и проливы',
@@ -49,6 +59,9 @@ export function SettingsForm({
         <Field label="Карта">
           <T>{getMap(value.mapId).name}</T>
         </Field>
+        <Field label="Начало партии" hint={START_HINT[value.startMode]}>
+          <T>{START_LABEL[value.startMode]}</T>
+        </Field>
         <Field label="Соперники">
           <T>
             ИИ: {value.aiCount}, сложность: {CONFIG.ai.difficulties[value.aiDifficulty].label.toLowerCase()}
@@ -72,6 +85,16 @@ export function SettingsForm({
       <Field label="Карта" hint={MAP_HINT[value.mapId]}>
         <Segmented<string> options={MAPS.map((m) => ({ value: m.id, label: m.name }))} value={value.mapId} onChange={(mapId) => set({ mapId })} />
       </Field>
+      <Field
+        label="Начало партии"
+        hint={START_HINT[value.startMode] + (value.startMode === 'divided' && value.victory === 'flag' ? '. Ничейной останется только клетка с флагом' : '')}
+      >
+        <Segmented<StartMode>
+          options={(Object.keys(START_LABEL) as StartMode[]).map((m) => ({ value: m, label: START_LABEL[m] }))}
+          value={value.startMode}
+          onChange={(startMode) => set({ startMode })}
+        />
+      </Field>
       <Field label="Число ИИ-соперников">
         <Stepper value={value.aiCount} min={minAI} max={maxAI} onChange={(aiCount) => set({ aiCount })} />
       </Field>
@@ -90,7 +113,10 @@ export function SettingsForm({
         />
       </Field>
       {value.victory === 'superiority' && (
-        <Field label="Порог превосходства">
+        <Field
+          label="Порог превосходства"
+          hint={value.startMode === 'divided' ? 'На поделённой карте порог не ниже начальной доли самого крупного игрока + 10%' : undefined}
+        >
           <Stepper
             value={value.superiority}
             min={CONFIG.victory.superiorityMin}

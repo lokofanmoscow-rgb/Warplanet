@@ -42,9 +42,12 @@ export function LobbyLayout({
   onBack,
   children,
   footer,
+  preview,
 }: {
   title: string;
   mapId: string;
+  /** Готовый раздел карты (режим «Карта поделена»); без него — вся суша ничейная. */
+  preview?: GameState | null;
   markers: StartMarker[];
   onPickStart?: (cell: CellId) => void;
   onBack: () => void;
@@ -54,7 +57,8 @@ export function LobbyLayout({
   const { s, landscape, width } = useLayout();
   const insets = useSafeAreaInsets();
   const map = getMap(mapId);
-  const game = useMemo(() => previewGame(mapId), [mapId]);
+  const blank = useMemo(() => previewGame(mapId), [mapId]);
+  const game = preview ?? blank;
   const wide = landscape && width >= 640;
   const panelW = Math.min(420 * s, width * 0.46);
 
