@@ -16,8 +16,6 @@ export type Sfx =
   | 'build'
   | 'recruit'
   | 'battle'
-  | 'capture'
-  | 'lost'
   | 'turn'
   | 'war'
   | 'peace'
@@ -33,8 +31,6 @@ const SOURCES: Record<Sfx, number> = {
   build: require('../../assets/sounds/build.wav'),
   recruit: require('../../assets/sounds/recruit.wav'),
   battle: require('../../assets/sounds/battle.wav'),
-  capture: require('../../assets/sounds/capture.wav'),
-  lost: require('../../assets/sounds/lost.wav'),
   turn: require('../../assets/sounds/turn.wav'),
   war: require('../../assets/sounds/war.wav'),
   peace: require('../../assets/sounds/peace.wav'),

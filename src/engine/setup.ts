@@ -85,10 +85,10 @@ export function createGame(opts: NewGameOptions): GameState {
   }
   const divided = opts.startMode === 'divided';
   const free = rng.shuffle(map.startPoints.filter((s) => !taken.has(s)));
-  // Поделённой карте нужны столицы подальше друг от друга, иначе кому-то достанется угол.
-  const starts = divided
-    ? spreadStarts(map, opts.players.map((p) => p.start ?? null), free)
-    : opts.players.map((p) => (p.start != null ? p.start : free.pop()!));
+  // Поделённой карте нужны столицы подальше друг от друга, иначе кому-то достанется угол;
+  // в обычной партии — случайные, но не впритык.
+  const chosen = opts.players.map((p) => p.start ?? null);
+  const starts = divided ? spreadStarts(map, chosen, free, rng) : scatterStarts(map, chosen, free);
 
   const cells: CellState[] = map.cells.map((c) => ({
     owner: null as number | null,
@@ -130,14 +130,11 @@ export function createGame(opts: NewGameOptions): GameState {
   };
 
   if (divided) {
-    // Вся суша сразу у игроков, в каждой провинции небольшой гарнизон. Ничейной остаётся
+    // Вся суша сразу у игроков, войска — в столице и ещё в части провинций. Ничейной остаётся
     // только клетка с флагом, если играют на захват флага.
     const flag = settings.victory === 'flag' ? (opts.flagCell != null && !starts.includes(opts.flagCell) ? opts.flagCell : pickFlagCell(map)) : null;
     divideLand(map, cells, starts, flag);
-    map.cells.forEach((c, i) => {
-      if (c.kind !== 'land' || cells[i].owner === null || starts.includes(i)) return;
-      cells[i].troops = Math.max(CONFIG.start.dividedGarrisonMin, Math.round(militiaFor(c.pop) * CONFIG.start.dividedGarrisonShare));
-    });
+    placeGarrisons(map, cells, starts, rng);
     if (flag !== null) settings.flagCell = flag;
     // Порог превосходства — заметно выше начальной доли самого крупного игрока.
     const land = map.cells.filter((c) => c.kind === 'land').length;
@@ -191,12 +188,29 @@ export function createGame(opts: NewGameOptions): GameState {
 }
 
 /**
- * Столицы для поделённой карты: выбранные игроками остаются, остальным — по очереди точка,
- * самая далёкая от уже занятых (среди равных — первая в перемешанном списке).
+ * Столицы обычной партии: выбранные игроками остаются, остальным — случайные точки не ближе
+ * startSpacing шагов к уже занятым (если таких нет — хотя бы не соседние).
  */
-function spreadStarts(map: MapDef, chosen: (CellId | null)[], shuffled: CellId[]): CellId[] {
+function scatterStarts(map: MapDef, chosen: (CellId | null)[], shuffled: CellId[]): CellId[] {
   const out = [...chosen];
-  const pool = [...shuffled].reverse();
+  const pool = [...shuffled];
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] !== null) continue;
+    const taken = out.filter((s): s is CellId => s !== null);
+    const dist = taken.length ? distancesFrom(map, taken) : null;
+    const k = [CONFIG.start.startSpacing, 2, 0].map((d) => pool.findIndex((c) => !dist || dist[c] >= d)).find((x) => x >= 0)!;
+    out[i] = pool.splice(k, 1)[0];
+  }
+  return out as CellId[];
+}
+
+/**
+ * Столицы для поделённой карты: выбранные игроками остаются, остальным — по очереди случайная
+ * точка из самых далёких от уже занятых (не ближе 80% наибольшего расстояния).
+ */
+function spreadStarts(map: MapDef, chosen: (CellId | null)[], shuffled: CellId[], rng: Rng): CellId[] {
+  const out = [...chosen];
+  const pool = [...shuffled];
   for (let i = 0; i < out.length; i++) {
     if (out[i] !== null) continue;
     const taken = out.filter((s): s is CellId => s !== null);
@@ -205,11 +219,30 @@ function spreadStarts(map: MapDef, chosen: (CellId | null)[], shuffled: CellId[]
       continue;
     }
     const dist = distancesFrom(map, taken);
-    let best = 0;
-    for (let k = 1; k < pool.length; k++) if (dist[pool[k]] > dist[pool[best]]) best = k;
-    out[i] = pool.splice(best, 1)[0];
+    const far = Math.max(...pool.map((c) => dist[c]));
+    const good = pool.filter((c) => dist[c] >= Math.max(2, far * 0.8));
+    const pick = good.length ? good[rng.int(good.length)] : pool[0];
+    pool.splice(pool.indexOf(pick), 1);
+    out[i] = pick;
   }
   return out as CellId[];
+}
+
+/**
+ * Войска на поделённой карте: у каждого одинаковое число провинций с гарнизоном (около
+ * dividedGarrisonCells от меньшего из владений, считая столицу с её армией), все гарнизоны
+ * одного размера. Сначала — провинции на границе с соседями, среди них — случайные.
+ */
+function placeGarrisons(map: MapDef, cells: CellState[], starts: CellId[], rng: Rng) {
+  const isLand = (i: CellId) => map.cells[i].kind === 'land';
+  const own = starts.map((_, id) => map.cells.filter((c) => isLand(c.id) && cells[c.id].owner === id).map((c) => c.id));
+  const k = Math.max(1, Math.round(Math.min(...own.map((o) => o.length)) * CONFIG.start.dividedGarrisonCells));
+  own.forEach((list, id) => {
+    const rest = rng.shuffle(list.filter((c) => c !== starts[id]));
+    const border = (c: CellId) => map.cells[c].neighbors.some((n) => isLand(n) && cells[n].owner !== null && cells[n].owner !== id);
+    const ordered = [...rest.filter(border), ...rest.filter((c) => !border(c))];
+    for (const c of ordered.slice(0, k - 1)) cells[c].troops = CONFIG.start.dividedGarrison;
+  });
 }
 
 /**

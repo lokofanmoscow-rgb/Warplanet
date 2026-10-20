@@ -98,16 +98,10 @@ export function GameScreen({ controller: c }: { controller: MatchController }) {
   // Бой за боем: камера на клетку, через RESULT_AT — итог, через BATTLE_MS — следующий.
   useEffect(() => {
     if (!replay || replay.result) return;
-    const shown = replay.list[replay.index];
-    setFocus(shown.cell);
+    setFocus(replay.list[replay.index].cell);
+    // Звучит только сама перестрелка; итог боя — без отдельного звука.
     feedback('battle', 'heavy');
-    const showResult = setTimeout(() => {
-      setReplay((r) => (r ? { ...r, result: true } : r));
-      const viewers = c.localPlayers();
-      const good = battleResult(shown, map, viewers, () => '').good;
-      if (good) feedback('capture', 'success');
-      else feedback('lost', 'warning');
-    }, RESULT_AT);
+    const showResult = setTimeout(() => setReplay((r) => (r ? { ...r, result: true } : r)), RESULT_AT);
     const next = setTimeout(() => {
       setReplay((r) => (r && r.index + 1 < r.list.length ? { ...r, index: r.index + 1, result: false } : null));
       if (replay.index + 1 >= replay.list.length) setLogOpen(true);

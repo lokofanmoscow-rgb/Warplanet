@@ -327,27 +327,6 @@ sounds.battle = (() => {
   return normalize(reverb(x, 0.28, 0.84), 0.85);
 })();
 
-// Захват провинции: короткий сигнал трубы.
-sounds.capture = (() => {
-  const notes = [[0, 67, 0.12], [0.13, 72, 0.12], [0.26, 76, 0.12], [0.39, 79, 0.45]];
-  const x = buf(1.1);
-  for (const [at, n, len] of notes) {
-    const b = brass(n, len);
-    mix(x, at, len, (t, i) => b[i], 0.5);
-  }
-  return normalize(reverb(x, 0.25), 0.7);
-})();
-
-// Потеря провинции: нисходящий минор.
-sounds.lost = (() => {
-  const x = buf(1.3);
-  for (const [at, n, len] of [[0, 64, 0.3], [0.28, 60, 0.3], [0.56, 57, 0.55]]) {
-    const b = brass(n, len, { cutoff: 900, vib: 4 });
-    mix(x, at, len, (t, i) => b[i], 0.5);
-  }
-  return normalize(reverb(x, 0.3), 0.6);
-})();
-
 // Новый ход: удар колокола.
 sounds.turn = (() => normalize(reverb(bell(76, 1.8), 0.2), 0.5))();
 

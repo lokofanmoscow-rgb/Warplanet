@@ -829,13 +829,43 @@ for (const s of cfg.starts) {
   if (startPoints.includes(id)) { log(`   ! старт ${s.name} в той же провинции`); continue; }
   startPoints.push(id);
 }
+// Ещё стартовые точки до startCount: провинции, не соседние с уже выбранными. Сначала те, что
+// закрывают меньше всего соседей (так точек помещается больше), из них — самые населённые.
+const named = startPoints.length;
+// Только на суше, где есть куда расти: в обычной партии к столице сразу добавляются две соседние
+// провинции, поэтому острова меньше четырёх провинций не годятся.
+const compSize = new Map();
+for (const c of outCells) {
+  if (c.kind !== 'land' || compSize.has(c.id)) continue;
+  const comp = [c.id];
+  const seen = new Set(comp);
+  for (let i = 0; i < comp.length; i++) for (const n of outCells[comp[i]].neighbors) {
+    if (outCells[n].kind === 'land' && !seen.has(n)) { seen.add(n); comp.push(n); }
+  }
+  for (const id of comp) compSize.set(id, comp.length);
+}
+const landIds = new Set(outCells.filter((c) => c.kind === 'land' && compSize.get(c.id) >= 4).map((c) => c.id));
+const blocked = (id) => startPoints.includes(id) || startPoints.some((s) => outCells[s].neighbors.includes(id));
+while (startPoints.length < (cfg.startCount ?? 0)) {
+  const cand = [...landIds].filter((id) => !blocked(id));
+  if (!cand.length) break;
+  const cost = (id) => outCells[id].neighbors.filter((n) => landIds.has(n) && !blocked(n)).length;
+  cand.sort((a, b) => cost(a) - cost(b) || outCells[b].pop - outCells[a].pop || a - b);
+  startPoints.push(cand[0]);
+}
+// Не хватило — добавляем самые населённые и рядом с другими: соседние столицы игра сама не раздаёт.
+for (const c of [...landIds].map((id) => outCells[id]).sort((a, b) => b.pop - a.pop || a.id - b.id)) {
+  if (startPoints.length >= (cfg.startCount ?? 0)) break;
+  if (!startPoints.includes(c.id)) startPoints.push(c.id);
+}
+log(`   стартовых точек: ${startPoints.length} (из настроек ${named})`);
 
 // Проверки.
 const landOut = outCells.filter((c) => c.kind === 'land');
 const seaOut = outCells.filter((c) => c.kind === 'sea');
 const isolated = outCells.filter((c) => c.neighbors.length === 0);
 if (isolated.length) log(`   ! без соседей: ${isolated.map((c) => c.name).join(', ')}`);
-for (let i = 0; i < startPoints.length; i++) for (let j = i + 1; j < startPoints.length; j++) {
+for (let i = 0; i < named; i++) for (let j = i + 1; j < named; j++) {
   const a = outCells[startPoints[i]], b = outCells[startPoints[j]];
   if (a.neighbors.includes(b.id)) log(`   ! стартовые точки рядом: ${a.name} и ${b.name}`);
 }

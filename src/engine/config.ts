@@ -14,9 +14,12 @@ export const CONFIG = {
     army: 30,
     // Кроме столицы игрок получает столько соседних провинций.
     extraProvinces: 2,
-    // «Карта поделена»: гарнизон провинции = доля ополчения, которое там было бы, но не меньше минимума.
-    dividedGarrisonShare: 0.5,
-    dividedGarrisonMin: 3,
+    // «Карта поделена»: войска есть примерно в такой доле провинций каждого игрока (у всех поровну,
+    // считая столицу), в каждой — dividedGarrison солдат; сначала у границ с соседями.
+    dividedGarrisonCells: 0.3,
+    dividedGarrison: 10,
+    // Столицы раздаются не ближе стольких шагов друг от друга (если на карте хватает места).
+    startSpacing: 3,
     // Порог превосходства должен быть выше начальной доли — иначе победа на первом же ходу.
     dividedSuperiorityMargin: 10,
     happiness: 70,
@@ -183,7 +186,7 @@ export const CONFIG = {
   net: {
     port: 47630,
     serviceType: 'conquest',
-    protocolVersion: 8,
+    protocolVersion: 9,
     pingIntervalMs: 5000,
     // Нет данных дольше этого — соединение считается потерянным.
     timeoutMs: 15000,

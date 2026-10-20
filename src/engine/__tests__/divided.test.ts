@@ -29,10 +29,12 @@ describe.each(MAPS.map((m) => [m.id, m] as const))('карта %s поделен
       expect(s.cells[p.capital!].owner).toBe(p.id);
       expect(s.cells[p.capital!].troops).toBe(CONFIG.start.army);
     }
-    // Гарнизоны во всех провинциях, кроме столиц, — не меньше минимума.
-    for (const c of map.cells) {
-      if (c.kind !== 'land' || s.players.some((p) => p.capital === c.id)) continue;
-      expect(s.cells[c.id].troops).toBeGreaterThanOrEqual(CONFIG.start.dividedGarrisonMin);
+    // Войска — примерно в 30% провинций, у всех в одинаковом числе и одного размера.
+    const garrisoned = s.players.map((p) => map.cells.filter((c) => c.kind === 'land' && s.cells[c.id].owner === p.id && s.cells[c.id].troops > 0));
+    const k = Math.max(1, Math.round(Math.min(...counts) * CONFIG.start.dividedGarrisonCells));
+    for (const [id, list] of garrisoned.entries()) {
+      expect(list.length).toBe(k);
+      for (const c of list) expect(s.cells[c.id].troops).toBe(c.id === s.players[id].capital ? CONFIG.start.army : CONFIG.start.dividedGarrison);
     }
     // Порог превосходства выше начальной доли — победы на первом ходу не будет.
     expect(s.settings.superiority).toBeGreaterThan((Math.max(...counts) / land) * 100);
@@ -62,6 +64,17 @@ describe('поделённая карта', () => {
     const s = divided(map, 4, 2, { victory: 'flag' });
     const neutral = map.cells.filter((c) => c.kind === 'land' && s.cells[c.id].owner === null).map((c) => c.id);
     expect(neutral).toEqual([s.settings.flagCell]);
+  });
+
+  test.each(MAPS.map((m) => [m.id, m] as const))('карта %s: восемь столиц не стоят впритык ни в каком режиме', (_, m) => {
+    for (const startMode of ['classic', 'divided'] as const) {
+      for (const seed of [1, 2, 3, 4]) {
+        const s = createGame({ map: m, seed, startMode, players: Array.from({ length: 8 }, (_, i) => ({ name: `ИИ ${i}`, kind: 'ai' as const })) });
+        const caps = s.players.map((p) => p.capital!);
+        expect(new Set(caps).size).toBe(8);
+        for (const a of caps) for (const b of caps) if (a !== b) expect(m.cells[a].neighbors).not.toContain(b);
+      }
+    }
   });
 
   test('обычное начало не изменилось: столица и две провинции, остальное ничейное', () => {

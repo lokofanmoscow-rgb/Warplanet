@@ -33,12 +33,10 @@ describe.each(MAPS.map((m) => [m.id, m] as const))('карта %s', (_, map) => 
     expect(new Set(map.cells.map((c) => c.name)).size).toBe(map.cells.length);
   });
 
-  test('стартовые точки — суша, около 12, не граничат друг с другом', () => {
-    expect(map.startPoints.length).toBeGreaterThanOrEqual(8);
-    for (const s of map.startPoints) {
-      expect(map.cells[s].kind).toBe('land');
-      for (const o of map.startPoints) if (o !== s) expect(map.cells[s].neighbors).not.toContain(o);
-    }
+  test('стартовые точки — суша, их много и без повторов (соседние столицы игра сама не раздаёт)', () => {
+    expect(map.startPoints.length).toBeGreaterThanOrEqual(30);
+    expect(new Set(map.startPoints).size).toBe(map.startPoints.length);
+    for (const s of map.startPoints) expect(map.cells[s].kind).toBe('land');
   });
 
   test('у каждой клетки есть контур и точка для иконок', () => {
